@@ -1,0 +1,9 @@
+
+---
+command: bin/csibroker --listenAddr="0.0.0.0:$PORT" --serviceName="$SERVICENAME" --serviceId="csibroker"
+buildpack: binary_buildpack
+env:
+  SERVICENAME: csi
+  USERNAME: admin
+  PASSWORD: admin
+
