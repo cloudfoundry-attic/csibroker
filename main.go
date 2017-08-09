@@ -27,7 +27,7 @@ var atAddress = flag.String(
 
 var serviceName = flag.String(
 	"serviceName",
-	"nfsvolume",
+	"brokervolume",
 	"name of the service to register with cloud controller",
 )
 var serviceId = flag.String(
@@ -82,6 +82,8 @@ func createServer(logger lager.Logger) ifrit.Runner {
 	serviceBroker := csibroker.New(logger,
 		*serviceName, *serviceId,
 		&osshim.OsShim{}, clock.NewClock())
+
+	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId)
 
 	credentials := brokerapi.BrokerCredentials{Username: username, Password: password}
 	handler := brokerapi.New(serviceBroker, logger.Session("broker-api"), credentials)
