@@ -49,7 +49,7 @@ var _ = Describe("Broker", func() {
 				Expect(result.Requires).To(ContainElement(brokerapi.RequiredPermission("volume_mount")))
 
 				Expect(result.Plans[0].Name).To(Equal("Existing"))
-				Expect(result.Plans[0].ID).To(Equal("Existing"))
+				Expect(result.Plans[0].ID).To(Equal("CSI-Existing"))
 				Expect(result.Plans[0].Description).To(Equal("A preexisting filesystem"))
 			})
 		})

@@ -89,7 +89,7 @@ var _ = Describe("csibroker Main", func() {
 
 			Expect(catalog.Services[0].Name).To(Equal("something"))
 			Expect(catalog.Services[0].ID).To(Equal("someguid"))
-			Expect(catalog.Services[0].Plans[0].ID).To(Equal("Existing"))
+			Expect(catalog.Services[0].Plans[0].ID).To(Equal("CSI-Existing"))
 			Expect(catalog.Services[0].Plans[0].Name).To(Equal("Existing"))
 			Expect(catalog.Services[0].Plans[0].Description).To(Equal("A preexisting filesystem"))
 		})

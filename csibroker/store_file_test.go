@@ -3,15 +3,15 @@ package csibroker_test
 import (
 	"errors"
 
+	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/goshims/ioutilshim/ioutil_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
-	"code.cloudfoundry.org/csibroker/csibroker"
 	"github.com/pivotal-cf/brokerapi"
 
+	"encoding/json"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"encoding/json"
 )
 
 var _ = Describe("FileStore", func() {

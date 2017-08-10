@@ -79,7 +79,7 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 		Plans: []brokerapi.ServicePlan{
 			{
 				Name:        "Existing",
-				ID:          "Existing",
+				ID:          "CSI-Existing",
 				Description: "A preexisting filesystem",
 			},
 		},

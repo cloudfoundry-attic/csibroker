@@ -23,5 +23,3 @@ type Store interface {
 	Save(logger lager.Logger) error
 	Cleanup() error
 }
-
-
