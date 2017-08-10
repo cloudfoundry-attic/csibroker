@@ -2,11 +2,18 @@ package csibroker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+
+	"bytes"
+	"encoding/json"
 
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
+	csi "github.com/paulcwarren/spec"
+	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
 )
 
@@ -14,6 +21,12 @@ const (
 	PermissionVolumeMount = brokerapi.RequiredPermission("volume_mount")
 	DefaultContainerPath  = "/var/vcap/data"
 )
+
+var CSIversion = &csi.Version{
+	Major: 0,
+	Minor: 0,
+	Patch: 1,
+}
 
 type staticState struct {
 	ServiceName string `json:"ServiceName"`
@@ -25,7 +38,7 @@ type ServiceInstance struct {
 	PlanID           string `json:"plan_id"`
 	OrganizationGUID string `json:"organization_guid"`
 	SpaceGUID        string `json:"space_guid"`
-	Share            string
+	Name             string
 }
 
 type lock interface {
@@ -34,11 +47,13 @@ type lock interface {
 }
 
 type Broker struct {
-	logger lager.Logger
-	os     osshim.Os
-	mutex  lock
-	clock  clock.Clock
-	static staticState
+	logger  lager.Logger
+	os      osshim.Os
+	mutex   lock
+	clock   clock.Clock
+	static  staticState
+	store   Store
+	csi     csishim.Csi
 }
 
 func New(
@@ -46,13 +61,17 @@ func New(
 	serviceName, serviceId string,
 	os osshim.Os,
 	clock clock.Clock,
+	store Store,
+	csi csishim.Csi,
 ) *Broker {
 
 	theBroker := Broker{
-		logger: logger,
-		os:     os,
-		mutex:  &sync.Mutex{},
-		clock:  clock,
+		logger:  logger,
+		os:      os,
+		mutex:   &sync.Mutex{},
+		clock:   clock,
+		store:   store,
+		csi:     csi,
 		static: staticState{
 			ServiceName: serviceName,
 			ServiceId:   serviceId,
@@ -87,8 +106,58 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
-	return brokerapi.ProvisionedServiceSpec{}, nil
+	logger := b.logger.Session("provision").WithData(lager.Data{"instanceID": instanceID, "details": details})
+	logger.Info("start")
+	defer logger.Info("end")
+
+	var configuration csi.CreateVolumeRequest
+
+	var decoder *json.Decoder = json.NewDecoder(bytes.NewBuffer(details.RawParameters))
+	logger.Debug("provision-raw-parameters", lager.Data{"RawParameters": details.RawParameters})
+	err := decoder.Decode(&configuration)
+	if err != nil {
+		logger.Error("provision-raw-parameters-decode-error", err)
+		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
+	}
+
+	if configuration.Name == "" {
+		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires a \"name\"")
+	}
+
+	if len(configuration.GetVolumeCapabilities()) == 0 {
+		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
+	}
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	defer func() {
+		out := b.store.Save(logger)
+		if e == nil {
+			e = out
+		}
+	}()
+
+	instanceDetails := ServiceInstance{
+		details.ServiceID,
+		details.PlanID,
+		details.OrganizationGUID,
+		details.SpaceGUID,
+		configuration.Name}
+
+	if b.instanceConflicts(instanceDetails, instanceID) {
+		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
+	}
+
+	err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
+	if err != nil {
+		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
+	}
+
+	logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
+
+	return brokerapi.ProvisionedServiceSpec{IsAsync: false}, nil
 }
+
 func (b *Broker) Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (_ brokerapi.DeprovisionServiceSpec, e error) {
 	return brokerapi.DeprovisionServiceSpec{}, nil
 }
@@ -106,4 +175,8 @@ func (b *Broker) Update(context context.Context, instanceID string, details brok
 
 func (b *Broker) LastOperation(_ context.Context, instanceID string, operationData string) (brokerapi.LastOperation, error) {
 	return brokerapi.LastOperation{}, nil
+}
+
+func (b *Broker) instanceConflicts(details ServiceInstance, instanceID string) bool {
+	return b.store.IsInstanceConflict(instanceID, ServiceInstance(details))
 }

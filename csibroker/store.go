@@ -5,7 +5,7 @@ import (
 	"github.com/pivotal-cf/brokerapi"
 )
 
-//go:generate counterfeiter -o ../nfsbrokerfakes/fake_store.go . Store
+//go:generate counterfeiter -o ../csibrokerfakes/fake_store.go . Store
 type Store interface {
 	RetrieveInstanceDetails(id string) (ServiceInstance, error)
 	RetrieveBindingDetails(id string) (brokerapi.BindDetails, error)

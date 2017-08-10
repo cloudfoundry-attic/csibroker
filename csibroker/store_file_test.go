@@ -10,6 +10,7 @@ import (
 	"github.com/pivotal-cf/brokerapi"
 
 	"encoding/json"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -29,7 +30,7 @@ var _ = Describe("FileStore", func() {
 		state = csibroker.DynamicState{
 			InstanceMap: map[string]csibroker.ServiceInstance{
 				"service-name": {
-					Share: "server:/some-share",
+					Name: "server:/some-share",
 				},
 			},
 			BindingMap: map[string]brokerapi.BindDetails{},

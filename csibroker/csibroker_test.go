@@ -4,26 +4,37 @@ import (
 	"context"
 
 	"code.cloudfoundry.org/csibroker/csibroker"
+	"code.cloudfoundry.org/csibroker/csibrokerfakes"
+
+	"encoding/json"
+	"errors"
+
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
+	"github.com/paulcwarren/spec/csishim"
 )
 
 var _ = Describe("Broker", func() {
 	var (
-		broker *csibroker.Broker
-		fakeOs *os_fake.FakeOs
-		logger lager.Logger
-		ctx    context.Context
+		broker    *csibroker.Broker
+		fakeOs    *os_fake.FakeOs
+		logger    lager.Logger
+		ctx       context.Context
+		fakeStore *csibrokerfakes.FakeStore
+		fakeCsi   csishim.Csi
 	)
 
 	BeforeEach(func() {
 		logger = lagertest.NewTestLogger("test-broker")
 		ctx = context.TODO()
 		fakeOs = &os_fake.FakeOs{}
+		fakeStore = &csibrokerfakes.FakeStore{}
+		fakeCsi = &csi_fake.FakeCsi{}
 	})
 
 	Context("when creating first time", func() {
@@ -34,6 +45,8 @@ var _ = Describe("Broker", func() {
 				"service-id",
 				fakeOs,
 				nil,
+				fakeStore,
+				fakeCsi,
 			)
 		})
 
@@ -53,6 +66,147 @@ var _ = Describe("Broker", func() {
 				Expect(result.Plans[0].Description).To(Equal("A preexisting filesystem"))
 			})
 		})
-	})
 
+		Context(".Provision", func() {
+			var (
+				instanceID       string
+				provisionDetails brokerapi.ProvisionDetails
+				asyncAllowed     bool
+
+				spec brokerapi.ProvisionedServiceSpec
+				err  error
+			)
+
+			BeforeEach(func() {
+				instanceID = "some-instance-id"
+				configuration := `
+        {
+           "name":"csi-storage",
+           "volume_capabilities":[
+              {
+                 "mount":{
+                    "fsType":"fsType",
+                    "mountFlags":[
+                       "-o something",
+                       "-t anotherthing"
+                    ]
+                 }
+              }
+           ]
+        }
+        `
+				provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(configuration)}
+				asyncAllowed = false
+				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("not found"))
+			})
+
+			JustBeforeEach(func() {
+				spec, err = broker.Provision(ctx, instanceID, provisionDetails, asyncAllowed)
+			})
+
+			It("should not error", func() {
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should provision the service instance synchronously", func() {
+				Expect(spec.IsAsync).To(Equal(false))
+			})
+
+			It("should write state", func() {
+				Expect(fakeStore.SaveCallCount()).Should(BeNumerically(">", 0))
+			})
+
+			Context("create-service was given invalid JSON", func() {
+				BeforeEach(func() {
+					badJson := []byte("{this is not json")
+					provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(badJson)}
+				})
+
+				It("errors", func() {
+					Expect(err).To(Equal(brokerapi.ErrRawParamsInvalid))
+				})
+
+			})
+			Context("create-service was given valid JSON but no 'name'", func() {
+				BeforeEach(func() {
+					configuration := `
+					{
+            "volume_capabilities":[
+               {
+                  "mount":{
+                     "fsType":"fsType",
+                     "mountFlags":[
+                        "-o something",
+                        "-t anotherthing"
+                     ]
+                  }
+               }
+            ]
+          }`
+					provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(configuration)}
+				})
+
+				It("errors", func() {
+					Expect(err).To(Equal(errors.New("config requires a \"name\"")))
+				})
+			})
+
+			Context("create-service was given valid JSON but no 'volume_capabilities'", func() {
+				BeforeEach(func() {
+					configuration := `
+				  {
+				     "name":"csi-storage"
+				  }
+				  `
+					provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(configuration)}
+				})
+
+				It("errors", func() {
+					Expect(err).To(Equal(errors.New("config requires \"volume_capabilities\"")))
+				})
+			})
+
+			Context("when the service instance already exists with the same details", func() {
+				BeforeEach(func() {
+					fakeStore.IsInstanceConflictReturns(false)
+				})
+
+				It("should not error", func() {
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
+			Context("when the service instance already exists with different details", func() {
+				BeforeEach(func() {
+					fakeStore.IsInstanceConflictReturns(true)
+				})
+
+				It("should error", func() {
+					Expect(err).To(Equal(brokerapi.ErrInstanceAlreadyExists))
+				})
+			})
+
+			Context("when the service instance creation fails", func() {
+				BeforeEach(func() {
+					fakeStore.CreateInstanceDetailsReturns(errors.New("badness"))
+				})
+
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			Context("when the save fails", func() {
+				BeforeEach(func() {
+					fakeStore.SaveReturns(errors.New("badness"))
+				})
+
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+		})
+
+	})
 })
