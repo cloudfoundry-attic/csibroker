@@ -21,6 +21,7 @@ import (
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"
 	"github.com/tedsuo/ifrit/http_server"
+	"google.golang.org/grpc"
 )
 
 var dataDir = flag.String(
@@ -101,11 +102,13 @@ func createServer(logger lager.Logger) ifrit.Runner {
 	fileName := filepath.Join(*dataDir, fmt.Sprintf("%s-services.json", *serviceName))
 
 	store := csibroker.NewFileStore(fileName, &ioutilshim.IoutilShim{})
-
+	conn, err := grpc.Dial(*atAddress, grpc.WithInsecure())
+	if err != nil {
+		panic(err)
+	}
 	serviceBroker := csibroker.New(logger,
 		*serviceName, *serviceId,
-		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{})
-
+		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
 	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId)
 
 	credentials := brokerapi.BrokerCredentials{Username: username, Password: password}

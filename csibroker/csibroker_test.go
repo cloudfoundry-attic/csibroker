@@ -2,13 +2,10 @@ package csibroker_test
 
 import (
 	"context"
-
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csibroker/csibrokerfakes"
-
 	"encoding/json"
 	"errors"
-
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
@@ -16,7 +13,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
-	"github.com/paulcwarren/spec/csishim"
+	"google.golang.org/grpc"
+	"strconv"
+	"github.com/paulcwarren/spec"
 )
 
 var _ = Describe("Broker", func() {
@@ -26,7 +25,10 @@ var _ = Describe("Broker", func() {
 		logger    lager.Logger
 		ctx       context.Context
 		fakeStore *csibrokerfakes.FakeStore
-		fakeCsi   csishim.Csi
+		fakeCsi   *csi_fake.FakeCsi
+		conn      *grpc.ClientConn
+		fakeController *csi_fake.FakeControllerClient
+		err       error
 	)
 
 	BeforeEach(func() {
@@ -35,6 +37,10 @@ var _ = Describe("Broker", func() {
 		fakeOs = &os_fake.FakeOs{}
 		fakeStore = &csibrokerfakes.FakeStore{}
 		fakeCsi = &csi_fake.FakeCsi{}
+		fakeController = &csi_fake.FakeControllerClient{}
+		fakeCsi.NewControllerClientReturns(fakeController)
+		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
+		conn, err = grpc.Dial(listenAddr)
 	})
 
 	Context("when creating first time", func() {
@@ -47,6 +53,7 @@ var _ = Describe("Broker", func() {
 				nil,
 				fakeStore,
 				fakeCsi,
+				conn,
 			)
 		})
 
@@ -73,15 +80,20 @@ var _ = Describe("Broker", func() {
 				provisionDetails brokerapi.ProvisionDetails
 				asyncAllowed     bool
 
+				configuration string
 				spec brokerapi.ProvisionedServiceSpec
 				err  error
 			)
 
 			BeforeEach(func() {
 				instanceID = "some-instance-id"
-				configuration := `
+				configuration = `
         {
            "name":"csi-storage",
+           "capacity_range":{
+              "requiredBytes":"2",
+              "limitBytes":"3"
+           },
            "volume_capabilities":[
               {
                  "mount":{
@@ -92,7 +104,10 @@ var _ = Describe("Broker", func() {
                     ]
                  }
               }
-           ]
+           ],
+           "parameters":{
+              "a":"b"
+           }
         }
         `
 				provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(configuration)}
@@ -114,6 +129,29 @@ var _ = Describe("Broker", func() {
 
 			It("should write state", func() {
 				Expect(fakeStore.SaveCallCount()).Should(BeNumerically(">", 0))
+			})
+
+			It("should send the request to the controller client", func() {
+				expectedRequest := &csi.CreateVolumeRequest{
+					Version: csibroker.CSIversion,
+					Name: "csi-storage",
+					CapacityRange: &csi.CapacityRange{
+						RequiredBytes: 2,
+						LimitBytes: 3,
+					},
+					VolumeCapabilities: []*csi.VolumeCapability{{
+						Value: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "fsType",
+								MountFlags: []string{"-o something", "-t anotherthing"},
+							},
+						},
+					}},
+					Parameters: map[string]string{"a":"b"},
+				}
+				Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
+				_, request, _ := fakeController.CreateVolumeArgsForCall(0)
+				Expect(request).To(Equal(expectedRequest))
 			})
 
 			Context("create-service was given invalid JSON", func() {
@@ -205,8 +243,6 @@ var _ = Describe("Broker", func() {
 					Expect(err).To(HaveOccurred())
 				})
 			})
-
 		})
-
 	})
 })

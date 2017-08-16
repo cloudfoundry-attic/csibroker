@@ -5,16 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"bytes"
-	"encoding/json"
-
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	csi "github.com/paulcwarren/spec"
 	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
+	"google.golang.org/grpc"
+	"github.com/golang/protobuf/jsonpb"
 )
 
 const (
@@ -54,6 +52,7 @@ type Broker struct {
 	static  staticState
 	store   Store
 	csi     csishim.Csi
+	controllerClient csi.ControllerClient
 }
 
 func New(
@@ -63,6 +62,7 @@ func New(
 	clock clock.Clock,
 	store Store,
 	csi csishim.Csi,
+  conn *grpc.ClientConn,
 ) *Broker {
 
 	theBroker := Broker{
@@ -72,6 +72,7 @@ func New(
 		clock:   clock,
 		store:   store,
 		csi:     csi,
+		controllerClient: csi.NewControllerClient(conn),
 		static: staticState{
 			ServiceName: serviceName,
 			ServiceId:   serviceId,
@@ -112,14 +113,13 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 
 	var configuration csi.CreateVolumeRequest
 
-	var decoder *json.Decoder = json.NewDecoder(bytes.NewBuffer(details.RawParameters))
 	logger.Debug("provision-raw-parameters", lager.Data{"RawParameters": details.RawParameters})
-	err := decoder.Decode(&configuration)
+	err := jsonpb.UnmarshalString(string(details.RawParameters), &configuration)
 	if err != nil {
 		logger.Error("provision-raw-parameters-decode-error", err)
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
 	}
-
+	configuration.Version = CSIversion
 	if configuration.Name == "" {
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires a \"name\"")
 	}
@@ -127,7 +127,6 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 	if len(configuration.GetVolumeCapabilities()) == 0 {
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
-
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	defer func() {
@@ -136,7 +135,6 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 			e = out
 		}
 	}()
-
 	instanceDetails := ServiceInstance{
 		details.ServiceID,
 		details.PlanID,
@@ -147,13 +145,13 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 	if b.instanceConflicts(instanceDetails, instanceID) {
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
 	}
-
 	err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
 	}
-
 	logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
+
+	b.controllerClient.CreateVolume(context, &configuration)
 
 	return brokerapi.ProvisionedServiceSpec{IsAsync: false}, nil
 }
