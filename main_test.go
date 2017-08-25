@@ -114,14 +114,33 @@ func (r failRunner) Run(sigChan <-chan os.Signal, ready chan<- struct{}) error {
 }
 
 var _ = Describe("csibroker Main", func() {
+	var (
+		tempDir string
+	)
+	BeforeEach(func() {
+		tempDir = os.TempDir()
+	})
+
 	Context("Missing required args", func() {
 		var process ifrit.Process
-		It("shows usage", func() {
+		It("shows usage to include dataDir", func() {
 			var args []string
 			volmanRunner := failRunner{
 				Name:       "nfsbroker",
 				Command:    exec.Command(binaryPath, args...),
 				StartCheck: "dataDir must be provided.",
+			}
+			process = ifrit.Invoke(volmanRunner)
+
+		})
+
+		It("shows usage to include csiConAddr", func() {
+			var args []string
+			args = append(args, "-dataDir", tempDir)
+			volmanRunner := failRunner{
+				Name:       "nfsbroker",
+				Command:    exec.Command(binaryPath, args...),
+				StartCheck: "csiConAddr must be provided.",
 			}
 			process = ifrit.Invoke(volmanRunner)
 
@@ -137,7 +156,7 @@ var _ = Describe("csibroker Main", func() {
 		var (
 			args               []string
 			listenAddr         string
-			tempDir            string
+			csiConAddr         string
 			username, password string
 
 			process ifrit.Process
@@ -147,12 +166,13 @@ var _ = Describe("csibroker Main", func() {
 			listenAddr = "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 			username = "admin"
 			password = "password"
-			tempDir = os.TempDir()
+			csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
 
 			args = append(args, "-listenAddr", listenAddr)
 			args = append(args, "-dataDir", tempDir)
 			args = append(args, "-username", username)
 			args = append(args, "-password", password)
+			args = append(args, "-csiConAddr", csiConAddr)
 		})
 
 		JustBeforeEach(func() {

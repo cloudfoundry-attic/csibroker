@@ -75,6 +75,12 @@ var planDesc = flag.String(
 	"description of the service plan to register with cloud controller",
 )
 
+var csiConAddr = flag.String(
+	"csiConAddr",
+	"",
+	"[REQUIRED] - address por CSI controller is listen to",
+)
+
 func main() {
 	parseCommandLine()
 	checkParams()
@@ -113,16 +119,25 @@ func checkParams() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if *csiConAddr == "" {
+		fmt.Fprint(os.Stderr, "\nERROR:csiConAddr must be provided.\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
 }
 
 func createServer(logger lager.Logger) ifrit.Runner {
 	fileName := filepath.Join(*dataDir, fmt.Sprintf("%s-services.json", *serviceName))
 
+	logger.Debug("csiConAddress: " + *csiConAddr)
 	store := csibroker.NewFileStore(fileName, &ioutilshim.IoutilShim{})
-	conn, err := grpc.Dial(*atAddress, grpc.WithInsecure())
+	conn, err := grpc.Dial(*csiConAddr, grpc.WithInsecure())
+
 	if err != nil {
-		panic(err)
+		logger.Error("Cannot reach csi plugin", err)
+		os.Exit(1)
 	}
+
 	serviceBroker := csibroker.New(logger,
 		*serviceName, *serviceId, *planName, *planId, *planDesc,
 		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
