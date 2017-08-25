@@ -47,14 +47,20 @@ var serviceId = flag.String(
 	"ID of the service to register with cloud controller",
 )
 
-var (
-	username string
-	password string
+var username = flag.String(
+	"username",
+	"admin",
+	"basic auth username to verify on incoming requests",
+)
+
+var password = flag.String(
+	"password",
+	"admin",
+	"basic auth password to verify on incoming requests",
 )
 
 func main() {
 	parseCommandLine()
-	parseEnvironment()
 	checkParams()
 
 	sink, err := lager.NewRedactingWriterSink(os.Stdout, lager.DEBUG, nil, nil)
@@ -69,8 +75,8 @@ func main() {
 
 	if dbgAddr := debugserver.DebugAddress(flag.CommandLine); dbgAddr != "" {
 		server = utils.ProcessRunnerFor(grouper.Members{
-			{"debug-server", debugserver.Runner(dbgAddr, logSink)},
-			{"broker-api", server},
+			{Name: "debug-server", Runner: debugserver.Runner(dbgAddr, logSink)},
+			{Name: "broker-api", Runner: server},
 		})
 	}
 
@@ -83,11 +89,6 @@ func parseCommandLine() {
 	lagerflags.AddFlags(flag.CommandLine)
 	debugserver.AddFlags(flag.CommandLine)
 	flag.Parse()
-}
-
-func parseEnvironment() {
-	username, _ = os.LookupEnv("USERNAME")
-	password, _ = os.LookupEnv("PASSWORD")
 }
 
 func checkParams() {
@@ -111,7 +112,7 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
 	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId)
 
-	credentials := brokerapi.BrokerCredentials{Username: username, Password: password}
+	credentials := brokerapi.BrokerCredentials{Username: *username, Password: *password}
 	handler := brokerapi.New(serviceBroker, logger.Session("broker-api"), credentials)
 
 	return http_server.New(*atAddress, handler)

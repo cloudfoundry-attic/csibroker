@@ -16,11 +16,12 @@ import (
 	"github.com/tedsuo/ifrit/ginkgomon"
 
 	"fmt"
+	"time"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
-	"time"
 )
 
 type failRunner struct {
@@ -148,11 +149,10 @@ var _ = Describe("csibroker Main", func() {
 			password = "password"
 			tempDir = os.TempDir()
 
-			os.Setenv("USERNAME", username)
-			os.Setenv("PASSWORD", password)
-
 			args = append(args, "-listenAddr", listenAddr)
 			args = append(args, "-dataDir", tempDir)
+			args = append(args, "-username", username)
+			args = append(args, "-password", password)
 		})
 
 		JustBeforeEach(func() {
