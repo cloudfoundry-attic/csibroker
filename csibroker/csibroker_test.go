@@ -2,33 +2,34 @@ package csibroker_test
 
 import (
 	"context"
-	"code.cloudfoundry.org/csibroker/csibroker"
-	"code.cloudfoundry.org/csibroker/csibrokerfakes"
 	"encoding/json"
 	"errors"
+	"strconv"
+
+	"code.cloudfoundry.org/csibroker/csibroker"
+	"code.cloudfoundry.org/csibroker/csibrokerfakes"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/paulcwarren/spec"
 	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
-	"strconv"
-	"github.com/paulcwarren/spec"
 )
 
 var _ = Describe("Broker", func() {
 	var (
-		broker    *csibroker.Broker
-		fakeOs    *os_fake.FakeOs
-		logger    lager.Logger
-		ctx       context.Context
-		fakeStore *csibrokerfakes.FakeStore
-		fakeCsi   *csi_fake.FakeCsi
-		conn      *grpc.ClientConn
+		broker         *csibroker.Broker
+		fakeOs         *os_fake.FakeOs
+		logger         lager.Logger
+		ctx            context.Context
+		fakeStore      *csibrokerfakes.FakeStore
+		fakeCsi        *csi_fake.FakeCsi
+		conn           *grpc.ClientConn
 		fakeController *csi_fake.FakeControllerClient
-		err       error
+		err            error
 	)
 
 	BeforeEach(func() {
@@ -49,6 +50,9 @@ var _ = Describe("Broker", func() {
 				logger,
 				"service-name",
 				"service-id",
+				"plan-name",
+				"plan-id",
+				"plan-desc",
 				fakeOs,
 				nil,
 				fakeStore,
@@ -68,9 +72,9 @@ var _ = Describe("Broker", func() {
 				Expect(result.Tags).To(ContainElement("csi"))
 				Expect(result.Requires).To(ContainElement(brokerapi.RequiredPermission("volume_mount")))
 
-				Expect(result.Plans[0].Name).To(Equal("Existing"))
-				Expect(result.Plans[0].ID).To(Equal("CSI-Existing"))
-				Expect(result.Plans[0].Description).To(Equal("A preexisting filesystem"))
+				Expect(result.Plans[0].Name).To(Equal("plan-name"))
+				Expect(result.Plans[0].ID).To(Equal("plan-id"))
+				Expect(result.Plans[0].Description).To(Equal("plan-desc"))
 			})
 		})
 
@@ -81,8 +85,8 @@ var _ = Describe("Broker", func() {
 				asyncAllowed     bool
 
 				configuration string
-				spec brokerapi.ProvisionedServiceSpec
-				err  error
+				spec          brokerapi.ProvisionedServiceSpec
+				err           error
 			)
 
 			BeforeEach(func() {
@@ -134,20 +138,20 @@ var _ = Describe("Broker", func() {
 			It("should send the request to the controller client", func() {
 				expectedRequest := &csi.CreateVolumeRequest{
 					Version: csibroker.CSIversion,
-					Name: "csi-storage",
+					Name:    "csi-storage",
 					CapacityRange: &csi.CapacityRange{
 						RequiredBytes: 2,
-						LimitBytes: 3,
+						LimitBytes:    3,
 					},
 					VolumeCapabilities: []*csi.VolumeCapability{{
 						Value: &csi.VolumeCapability_Mount{
 							Mount: &csi.VolumeCapability_MountVolume{
-								FsType: "fsType",
+								FsType:     "fsType",
 								MountFlags: []string{"-o something", "-t anotherthing"},
 							},
 						},
 					}},
-					Parameters: map[string]string{"a":"b"},
+					Parameters: map[string]string{"a": "b"},
 				}
 				Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
 				_, request, _ := fakeController.CreateVolumeArgsForCall(0)

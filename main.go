@@ -59,6 +59,22 @@ var password = flag.String(
 	"basic auth password to verify on incoming requests",
 )
 
+var planName = flag.String(
+	"planName",
+	"free",
+	"name of the service plan to register with cloud controller",
+)
+var planId = flag.String(
+	"planId",
+	"free-plan-guid",
+	"ID of the service plan to register with cloud controller",
+)
+var planDesc = flag.String(
+	"planDesc",
+	"free csi local filesystem",
+	"description of the service plan to register with cloud controller",
+)
+
 func main() {
 	parseCommandLine()
 	checkParams()
@@ -108,9 +124,9 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		panic(err)
 	}
 	serviceBroker := csibroker.New(logger,
-		*serviceName, *serviceId,
+		*serviceName, *serviceId, *planName, *planId, *planDesc,
 		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
-	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId)
+	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId + ", planName: " + *planName + ", planId: " + *planId + ", planDesc: " + *planDesc)
 
 	credentials := brokerapi.BrokerCredentials{Username: *username, Password: *password}
 	handler := brokerapi.New(serviceBroker, logger.Session("broker-api"), credentials)

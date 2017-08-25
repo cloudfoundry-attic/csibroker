@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
+	"github.com/golang/protobuf/jsonpb"
 	csi "github.com/paulcwarren/spec"
 	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
-	"github.com/golang/protobuf/jsonpb"
 )
 
 const (
@@ -29,6 +30,9 @@ var CSIversion = &csi.Version{
 type staticState struct {
 	ServiceName string `json:"ServiceName"`
 	ServiceId   string `json:"ServiceId"`
+	PlanName    string `json:"PlanName"`
+	PlanId      string `json:"PlanId"`
+	PlanDesc    string `json:"PlanDesc"`
 }
 
 type ServiceInstance struct {
@@ -45,37 +49,41 @@ type lock interface {
 }
 
 type Broker struct {
-	logger  lager.Logger
-	os      osshim.Os
-	mutex   lock
-	clock   clock.Clock
-	static  staticState
-	store   Store
-	csi     csishim.Csi
+	logger           lager.Logger
+	os               osshim.Os
+	mutex            lock
+	clock            clock.Clock
+	static           staticState
+	store            Store
+	csi              csishim.Csi
 	controllerClient csi.ControllerClient
 }
 
 func New(
 	logger lager.Logger,
 	serviceName, serviceId string,
+	planName, planId, planDesc string,
 	os osshim.Os,
 	clock clock.Clock,
 	store Store,
 	csi csishim.Csi,
-  conn *grpc.ClientConn,
+	conn *grpc.ClientConn,
 ) *Broker {
 
 	theBroker := Broker{
-		logger:  logger,
-		os:      os,
-		mutex:   &sync.Mutex{},
-		clock:   clock,
-		store:   store,
-		csi:     csi,
+		logger:           logger,
+		os:               os,
+		mutex:            &sync.Mutex{},
+		clock:            clock,
+		store:            store,
+		csi:              csi,
 		controllerClient: csi.NewControllerClient(conn),
 		static: staticState{
 			ServiceName: serviceName,
 			ServiceId:   serviceId,
+			PlanName:    planName,
+			PlanId:      planId,
+			PlanDesc:    planDesc,
 		},
 	}
 
@@ -98,9 +106,9 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 
 		Plans: []brokerapi.ServicePlan{
 			{
-				Name:        "Existing",
-				ID:          "CSI-Existing",
-				Description: "A preexisting filesystem",
+				Name:        b.static.PlanName,
+				ID:          b.static.PlanId,
+				Description: b.static.PlanDesc,
 			},
 		},
 	}}

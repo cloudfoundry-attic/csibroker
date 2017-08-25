@@ -187,6 +187,9 @@ var _ = Describe("csibroker Main", func() {
 			BeforeEach(func() {
 				args = append(args, "-serviceName", "something")
 				args = append(args, "-serviceId", "someguid")
+				args = append(args, "-planName", "someplanname")
+				args = append(args, "-planId", "someplanid")
+				args = append(args, "-planDesc", "someplandesc")
 			})
 
 			It("should pass arguments though to catalog", func() {
@@ -203,9 +206,9 @@ var _ = Describe("csibroker Main", func() {
 
 				Expect(catalog.Services[0].Name).To(Equal("something"))
 				Expect(catalog.Services[0].ID).To(Equal("someguid"))
-				Expect(catalog.Services[0].Plans[0].ID).To(Equal("CSI-Existing"))
-				Expect(catalog.Services[0].Plans[0].Name).To(Equal("Existing"))
-				Expect(catalog.Services[0].Plans[0].Description).To(Equal("A preexisting filesystem"))
+				Expect(catalog.Services[0].Plans[0].ID).To(Equal("someplanid"))
+				Expect(catalog.Services[0].Plans[0].Name).To(Equal("someplanname"))
+				Expect(catalog.Services[0].Plans[0].Description).To(Equal("someplandesc"))
 			})
 		})
 	})
