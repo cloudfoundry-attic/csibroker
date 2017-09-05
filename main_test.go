@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"encoding/json"
@@ -115,10 +116,18 @@ func (r failRunner) Run(sigChan <-chan os.Signal, ready chan<- struct{}) error {
 
 var _ = Describe("csibroker Main", func() {
 	var (
-		tempDir string
+		csiConAddr   string
+		tempDir      string
+		pwd          string
+		err          error
+		specFilepath string
 	)
 	BeforeEach(func() {
 		tempDir = os.TempDir()
+		pwd, err = os.Getwd()
+		Expect(err).ToNot(HaveOccurred())
+		csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
+		specFilepath = filepath.Join(pwd, "fixtures", "service_spec.json")
 	})
 
 	Context("Missing required args", func() {
@@ -141,6 +150,19 @@ var _ = Describe("csibroker Main", func() {
 				Name:       "nfsbroker",
 				Command:    exec.Command(binaryPath, args...),
 				StartCheck: "csiConAddr must be provided.",
+			}
+			process = ifrit.Invoke(volmanRunner)
+
+		})
+
+		It("shows usage to include serviceSpec", func() {
+			var args []string
+			args = append(args, "-dataDir", tempDir)
+			args = append(args, "-csiConAddr", csiConAddr)
+			volmanRunner := failRunner{
+				Name:       "nfsbroker",
+				Command:    exec.Command(binaryPath, args...),
+				StartCheck: "serviceSpec must be provided.",
 			}
 			process = ifrit.Invoke(volmanRunner)
 
@@ -173,6 +195,7 @@ var _ = Describe("csibroker Main", func() {
 			args = append(args, "-username", username)
 			args = append(args, "-password", password)
 			args = append(args, "-csiConAddr", csiConAddr)
+			args = append(args, "-serviceSpec", specFilepath)
 		})
 
 		JustBeforeEach(func() {
@@ -205,11 +228,7 @@ var _ = Describe("csibroker Main", func() {
 
 		Context("given arguments", func() {
 			BeforeEach(func() {
-				args = append(args, "-serviceName", "something")
-				args = append(args, "-serviceId", "someguid")
-				args = append(args, "-planName", "someplanname")
-				args = append(args, "-planId", "someplanid")
-				args = append(args, "-planDesc", "someplandesc")
+				args = append(args, "-serviceSpec", specFilepath)
 			})
 
 			It("should pass arguments though to catalog", func() {
@@ -224,11 +243,11 @@ var _ = Describe("csibroker Main", func() {
 				err = json.Unmarshal(bytes, &catalog)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(catalog.Services[0].Name).To(Equal("something"))
-				Expect(catalog.Services[0].ID).To(Equal("someguid"))
-				Expect(catalog.Services[0].Plans[0].ID).To(Equal("someplanid"))
-				Expect(catalog.Services[0].Plans[0].Name).To(Equal("someplanname"))
-				Expect(catalog.Services[0].Plans[0].Description).To(Equal("someplandesc"))
+				Expect(catalog.Services[0].Name).To(Equal("Service.Name"))
+				Expect(catalog.Services[0].ID).To(Equal("Service.ID"))
+				Expect(catalog.Services[0].Plans[0].ID).To(Equal("Service.Plans.ID"))
+				Expect(catalog.Services[0].Plans[0].Name).To(Equal("Service.Plans.Name"))
+				Expect(catalog.Services[0].Plans[0].Description).To(Equal("Service.Plans.Description"))
 			})
 		})
 	})

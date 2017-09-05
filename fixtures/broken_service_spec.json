@@ -1,0 +1,10 @@
+{
+   "brokenid":"Service.ID",
+   "brokenname":"Service.Name",
+   "description":"Service.Description",
+   "bindable":true,
+   "tags":[
+      "Service.Tag1",
+      "Service.Tag2"
+   ]
+}

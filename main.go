@@ -36,17 +36,6 @@ var atAddress = flag.String(
 	"host:port to serve service broker API",
 )
 
-var serviceName = flag.String(
-	"serviceName",
-	"brokervolume",
-	"name of the service to register with cloud controller",
-)
-var serviceId = flag.String(
-	"serviceId",
-	"service-guid",
-	"ID of the service to register with cloud controller",
-)
-
 var username = flag.String(
 	"username",
 	"admin",
@@ -59,20 +48,10 @@ var password = flag.String(
 	"basic auth password to verify on incoming requests",
 )
 
-var planName = flag.String(
-	"planName",
-	"free",
-	"name of the service plan to register with cloud controller",
-)
-var planId = flag.String(
-	"planId",
-	"free-plan-guid",
-	"ID of the service plan to register with cloud controller",
-)
-var planDesc = flag.String(
-	"planDesc",
-	"free csi local filesystem",
-	"description of the service plan to register with cloud controller",
+var serviceSpec = flag.String(
+	"serviceSpec",
+	"",
+	"[REQUIRED] - the file path of the specfile which defines the service",
 )
 
 var csiConAddr = flag.String(
@@ -124,10 +103,16 @@ func checkParams() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if *serviceSpec == "" {
+		fmt.Fprint(os.Stderr, "\nERROR:serviceSpec must be provided.\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
 }
 
 func createServer(logger lager.Logger) ifrit.Runner {
-	fileName := filepath.Join(*dataDir, fmt.Sprintf("%s-services.json", *serviceName))
+	fileName := filepath.Join(*dataDir, "csi-general-services.json")
 
 	logger.Debug("csiConAddress: " + *csiConAddr)
 	store := csibroker.NewFileStore(fileName, &ioutilshim.IoutilShim{})
@@ -138,10 +123,15 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		os.Exit(1)
 	}
 
-	serviceBroker := csibroker.New(logger,
-		*serviceName, *serviceId, *planName, *planId, *planDesc,
+	serviceBroker, err := csibroker.New(logger,
+		*serviceSpec,
 		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
-	logger.Info("listenAddr: " + *atAddress + ", serviceName: " + *serviceName + ", serviceId: " + *serviceId + ", planName: " + *planName + ", planId: " + *planId + ", planDesc: " + *planDesc)
+	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
+
+	if err != nil {
+		logger.Error("csibroker initialize error", err)
+		os.Exit(1)
+	}
 
 	credentials := brokerapi.BrokerCredentials{Username: *username, Password: *password}
 	handler := brokerapi.New(serviceBroker, logger.Session("broker-api"), credentials)

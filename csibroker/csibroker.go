@@ -2,8 +2,10 @@ package csibroker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"sync"
 
 	"code.cloudfoundry.org/clock"
@@ -27,14 +29,6 @@ var CSIversion = &csi.Version{
 	Patch: 1,
 }
 
-type staticState struct {
-	ServiceName string `json:"ServiceName"`
-	ServiceId   string `json:"ServiceId"`
-	PlanName    string `json:"PlanName"`
-	PlanId      string `json:"PlanId"`
-	PlanDesc    string `json:"PlanDesc"`
-}
-
 type ServiceInstance struct {
 	ServiceID        string `json:"service_id"`
 	PlanID           string `json:"plan_id"`
@@ -53,7 +47,7 @@ type Broker struct {
 	os               osshim.Os
 	mutex            lock
 	clock            clock.Clock
-	static           staticState
+	service          *brokerapi.Service
 	store            Store
 	csi              csishim.Csi
 	controllerClient csi.ControllerClient
@@ -61,14 +55,39 @@ type Broker struct {
 
 func New(
 	logger lager.Logger,
-	serviceName, serviceId string,
-	planName, planId, planDesc string,
+	serviceSpecPath string,
 	os osshim.Os,
 	clock clock.Clock,
 	store Store,
 	csi csishim.Csi,
 	conn *grpc.ClientConn,
-) *Broker {
+) (*Broker, error) {
+
+	logger = logger.Session("new-csi-broker")
+	logger.Info("start")
+	defer logger.Info("end")
+
+	serviceSpec, err := ioutil.ReadFile(serviceSpecPath)
+
+	if err != nil {
+		logger.Error("failed-to-read-service-spec", err, lager.Data{"fileName": serviceSpecPath})
+		return &Broker{}, err
+	}
+
+	brokerService := &brokerapi.Service{}
+
+	err = json.Unmarshal(serviceSpec, brokerService)
+	if err != nil {
+		logger.Error("failed-to-unmarshall-spec from spec-file", err, lager.Data{"fileName": serviceSpecPath})
+		return &Broker{}, err
+	}
+	logger.Info("spec-loaded", lager.Data{"fileName": serviceSpecPath})
+
+	if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
+		err = errors.New("Not an valid specfile")
+		logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "brokerService": brokerService})
+		return &Broker{}, err
+	}
 
 	theBroker := Broker{
 		logger:           logger,
@@ -78,16 +97,10 @@ func New(
 		store:            store,
 		csi:              csi,
 		controllerClient: csi.NewControllerClient(conn),
-		static: staticState{
-			ServiceName: serviceName,
-			ServiceId:   serviceId,
-			PlanName:    planName,
-			PlanId:      planId,
-			PlanDesc:    planDesc,
-		},
+		service:          brokerService,
 	}
 
-	return &theBroker
+	return &theBroker, nil
 }
 
 func (b *Broker) Services(_ context.Context) []brokerapi.Service {
@@ -95,23 +108,7 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 	logger.Info("start")
 	defer logger.Info("end")
 
-	return []brokerapi.Service{{
-		ID:            b.static.ServiceId,
-		Name:          b.static.ServiceName,
-		Description:   "Existing CSI volumes",
-		Bindable:      true,
-		PlanUpdatable: false,
-		Tags:          []string{"csi"},
-		Requires:      []brokerapi.RequiredPermission{PermissionVolumeMount},
-
-		Plans: []brokerapi.ServicePlan{
-			{
-				Name:        b.static.PlanName,
-				ID:          b.static.PlanId,
-				Description: b.static.PlanDesc,
-			},
-		},
-	}}
+	return []brokerapi.Service{*b.service}
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
