@@ -132,6 +132,13 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 	if len(configuration.GetVolumeCapabilities()) == 0 {
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
+
+	response, err := b.controllerClient.CreateVolume(context, &configuration)
+	volumeResponseError, ok := response.GetReply().(*csi.CreateVolumeResponse_Error)
+	if ok {
+		return brokerapi.ProvisionedServiceSpec{}, errors.New(volumeResponseError.Error.String())
+	}
+
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	defer func() {
@@ -156,13 +163,58 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 	}
 	logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
 
-	b.controllerClient.CreateVolume(context, &configuration)
-
 	return brokerapi.ProvisionedServiceSpec{IsAsync: false}, nil
 }
 
 func (b *Broker) Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (_ brokerapi.DeprovisionServiceSpec, e error) {
-	return brokerapi.DeprovisionServiceSpec{}, nil
+	logger := b.logger.Session("deprovision")
+	logger.Info("start")
+	defer logger.Info("end")
+
+	var configuration csi.DeleteVolumeRequest
+	configuration.Version = CSIversion
+
+	if instanceID == "" {
+		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires instance ID")
+	}
+	if details.PlanID == "" {
+		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires \"plan_id\"")
+	}
+	if details.ServiceID == "" {
+		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires \"service_id\"")
+	}
+	configuration.VolumeId = &csi.VolumeID{Values: map[string]string{"volume_name": instanceID}}
+	configuration.VolumeMetadata = &csi.VolumeMetadata{Values: map[string]string{
+		"plan_id": details.PlanID,
+		"service_id": details.ServiceID,
+	}}
+
+	response, _ := b.controllerClient.DeleteVolume(context, &configuration)
+	volumeResponseError, ok := response.GetReply().(*csi.DeleteVolumeResponse_Error)
+	if ok {
+		return brokerapi.DeprovisionServiceSpec{}, errors.New(volumeResponseError.Error.String())
+	}
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	defer func() {
+		out := b.store.Save(logger)
+		if e == nil {
+			e = out
+		}
+	}()
+
+	_, err := b.store.RetrieveInstanceDetails(instanceID)
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
+	}
+
+	err = b.store.DeleteInstanceDetails(instanceID)
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, err
+	}
+
+	return brokerapi.DeprovisionServiceSpec{IsAsync: false, OperationData: "deprovision"}, nil
 }
 func (b *Broker) Bind(context context.Context, instanceID string, bindingID string, bindDetails brokerapi.BindDetails) (_ brokerapi.Binding, e error) {
 	return brokerapi.Binding{}, nil

@@ -19,6 +19,7 @@ import (
 	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
+	"bytes"
 )
 
 var _ = Describe("Broker", func() {
@@ -155,10 +156,6 @@ var _ = Describe("Broker", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("should provision the service instance synchronously", func() {
-				Expect(spec.IsAsync).To(Equal(false))
-			})
-
 			It("should write state", func() {
 				Expect(fakeStore.SaveCallCount()).Should(BeNumerically(">", 0))
 			})
@@ -184,6 +181,16 @@ var _ = Describe("Broker", func() {
 				Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
 				_, request, _ := fakeController.CreateVolumeArgsForCall(0)
 				Expect(request).To(Equal(expectedRequest))
+			})
+
+			Context("when the client returns an error", func() {
+				BeforeEach(func() {
+					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Error{}}, nil)
+				})
+
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+				})
 			})
 
 			Context("create-service was given invalid JSON", func() {
@@ -273,6 +280,144 @@ var _ = Describe("Broker", func() {
 
 				It("should error", func() {
 					Expect(err).To(HaveOccurred())
+				})
+			})
+		})
+
+		Context(".Deprovision", func() {
+			var (
+				instanceID       string
+				asyncAllowed     bool
+				deprovisionDetails brokerapi.DeprovisionDetails
+				err           error
+			)
+
+			BeforeEach(func() {
+				instanceID = "some-instance-id"
+				deprovisionDetails = brokerapi.DeprovisionDetails{PlanID: "Existing", ServiceID: "some-service-id"}
+				asyncAllowed = true
+			})
+
+			JustBeforeEach(func() {
+				_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
+			})
+
+			Context("when the instance does not exist", func() {
+				BeforeEach(func() {
+					instanceID = "does-not-exist"
+					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, brokerapi.ErrInstanceDoesNotExist)
+				})
+
+				It("should fail", func() {
+					Expect(err).To(Equal(brokerapi.ErrInstanceDoesNotExist))
+				})
+			})
+
+			Context("given an existing instance", func() {
+				var (
+					previousSaveCallCount int
+				)
+
+				BeforeEach(func() {
+					configuration := map[string]interface{}{"share": "server:/some-share"}
+					buf := &bytes.Buffer{}
+					_ = json.NewEncoder(buf).Encode(configuration)
+					asyncAllowed = false
+					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{ServiceID: "some-service-id"}, nil)
+					previousSaveCallCount = fakeStore.SaveCallCount()
+				})
+
+				It("should succeed", func() {
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("save state", func() {
+					Expect(fakeStore.SaveCallCount()).To(Equal(previousSaveCallCount + 1))
+				})
+
+				It("should send the request to the controller client", func() {
+					expectedRequest := &csi.DeleteVolumeRequest{
+						Version: csibroker.CSIversion,
+						VolumeId:    &csi.VolumeID{
+							Values: map[string]string{"volume_name": instanceID},
+						},
+						VolumeMetadata: &csi.VolumeMetadata{
+							Values: map[string]string{"plan_id": "Existing", "service_id": "some-service-id"},
+						},
+					}
+					Expect(fakeController.DeleteVolumeCallCount()).To(Equal(1))
+					_, request, _ := fakeController.DeleteVolumeArgsForCall(0)
+					Expect(request).To(Equal(expectedRequest))
+				})
+
+				Context("when the client returns an error", func() {
+					BeforeEach(func() {
+						fakeController.DeleteVolumeReturns(&csi.DeleteVolumeResponse{Reply: &csi.DeleteVolumeResponse_Error{}}, nil)
+					})
+
+					It("should error", func() {
+						Expect(err).To(HaveOccurred())
+					})
+				})
+
+				Context("when deletion of the instance fails", func() {
+					BeforeEach(func() {
+						fakeStore.DeleteInstanceDetailsReturns(errors.New("badness"))
+					})
+
+					It("should error", func() {
+						Expect(err).To(HaveOccurred())
+					})
+				})
+
+				Context("when the save fails", func() {
+					BeforeEach(func() {
+						fakeStore.SaveReturns(errors.New("badness"))
+					})
+
+					It("should error", func() {
+						Expect(err).To(HaveOccurred())
+					})
+				})
+
+				Context("delete-service was given no 'service_id'", func() {
+					BeforeEach(func() {
+						deprovisionDetails = brokerapi.DeprovisionDetails{PlanID: "Existing"}
+					})
+
+					It("errors", func() {
+						Expect(err).To(Equal(errors.New("volume deletion requires \"service_id\"")))
+					})
+				})
+
+				Context("delete-service was given no 'plan_id'", func() {
+					BeforeEach(func() {
+						deprovisionDetails = brokerapi.DeprovisionDetails{ServiceID: "some-service-id"}
+					})
+
+					It("errors", func() {
+						Expect(err).To(Equal(errors.New("volume deletion requires \"plan_id\"")))
+					})
+				})
+
+				Context("delete-service was given no instance id", func() {
+					BeforeEach(func() {
+						instanceID = ""
+					})
+
+					It("errors", func() {
+						Expect(err).To(Equal(errors.New("volume deletion requires instance ID")))
+					})
+				})
+
+				Context("when the service instance already exists with the same details", func() {
+					BeforeEach(func() {
+						fakeStore.IsInstanceConflictReturns(false)
+					})
+
+					It("should not error", func() {
+						Expect(err).NotTo(HaveOccurred())
+					})
 				})
 			})
 		})
