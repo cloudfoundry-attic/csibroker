@@ -121,6 +121,7 @@ var _ = Describe("csibroker Main", func() {
 		pwd          string
 		err          error
 		specFilepath string
+		driverName   string
 	)
 	BeforeEach(func() {
 		tempDir = os.TempDir()
@@ -128,6 +129,7 @@ var _ = Describe("csibroker Main", func() {
 		Expect(err).ToNot(HaveOccurred())
 		csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
 		specFilepath = filepath.Join(pwd, "fixtures", "service_spec.json")
+		driverName = "some-csi-driver"
 	})
 
 	Context("Missing required args", func() {
@@ -168,6 +170,20 @@ var _ = Describe("csibroker Main", func() {
 
 		})
 
+		It("shows usage to include driverName", func() {
+			var args []string
+			args = append(args, "-dataDir", tempDir)
+			args = append(args, "-csiConAddr", csiConAddr)
+			args = append(args, "-serviceSpec", specFilepath)
+			volmanRunner := failRunner{
+				Name:       "nfsbroker",
+				Command:    exec.Command(binaryPath, args...),
+				StartCheck: "driverName must be provided.",
+			}
+			process = ifrit.Invoke(volmanRunner)
+
+		})
+
 		AfterEach(func() {
 			ginkgomon.Kill(process) // this is only if incorrect implementation leaves process running
 		})
@@ -196,6 +212,7 @@ var _ = Describe("csibroker Main", func() {
 			args = append(args, "-password", password)
 			args = append(args, "-csiConAddr", csiConAddr)
 			args = append(args, "-serviceSpec", specFilepath)
+			args = append(args, "-driverName", driverName)
 		})
 
 		JustBeforeEach(func() {

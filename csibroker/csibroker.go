@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"sync"
 
+	"path"
+
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
@@ -16,7 +18,6 @@ import (
 	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
-	"path"
 )
 
 const (
@@ -53,6 +54,7 @@ type Broker struct {
 	store            Store
 	csi              csishim.Csi
 	controllerClient csi.ControllerClient
+	driverName       string
 }
 
 func New(
@@ -63,6 +65,7 @@ func New(
 	store Store,
 	csi csishim.Csi,
 	conn *grpc.ClientConn,
+	driverName string,
 ) (*Broker, error) {
 
 	logger = logger.Session("new-csi-broker")
@@ -100,6 +103,7 @@ func New(
 		csi:              csi,
 		controllerClient: csi.NewControllerClient(conn),
 		service:          brokerService,
+		driverName:       driverName,
 	}
 
 	return &theBroker, nil
@@ -278,7 +282,7 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		VolumeMounts: []brokerapi.VolumeMount{{
 			ContainerDir: evaluateContainerPath(params, instanceID),
 			Mode:         mode,
-			Driver:       "csidriver",
+			Driver:       b.driverName,
 			DeviceType:   "shared",
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,

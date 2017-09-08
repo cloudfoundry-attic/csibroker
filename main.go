@@ -60,6 +60,12 @@ var csiConAddr = flag.String(
 	"[REQUIRED] - address por CSI controller is listen to",
 )
 
+var driverName = flag.String(
+	"driverName",
+	"",
+	"[REQUIRED] - driver name of CSI plugin",
+)
+
 func main() {
 	parseCommandLine()
 	checkParams()
@@ -108,6 +114,11 @@ func checkParams() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if *driverName == "" {
+		fmt.Fprint(os.Stderr, "\nERROR:driverName must be provided.\n\n")
+		flag.Usage()
+		os.Exit(1)
+	}
 
 }
 
@@ -125,7 +136,7 @@ func createServer(logger lager.Logger) ifrit.Runner {
 
 	serviceBroker, err := csibroker.New(logger,
 		*serviceSpec,
-		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn)
+		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn, *driverName)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
 
 	if err != nil {

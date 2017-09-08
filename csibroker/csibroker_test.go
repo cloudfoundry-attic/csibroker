@@ -34,6 +34,7 @@ var _ = Describe("Broker", func() {
 		conn           *grpc.ClientConn
 		fakeController *csi_fake.FakeControllerClient
 		err            error
+		driverName     string
 	)
 
 	BeforeEach(func() {
@@ -47,6 +48,7 @@ var _ = Describe("Broker", func() {
 		fakeCsi.NewControllerClientReturns(fakeController)
 		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 		conn, err = grpc.Dial(listenAddr, grpc.WithInsecure())
+		driverName = "some-csi-driver"
 	})
 
 	Context("when creating first time", func() {
@@ -65,6 +67,7 @@ var _ = Describe("Broker", func() {
 				fakeStore,
 				fakeCsi,
 				conn,
+				driverName,
 			)
 		})
 
@@ -98,6 +101,7 @@ var _ = Describe("Broker", func() {
 						fakeStore,
 						fakeCsi,
 						conn,
+						driverName,
 					)
 				})
 
@@ -523,7 +527,7 @@ var _ = Describe("Broker", func() {
 				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(binding.VolumeMounts[0].Driver).To(Equal("csidriver"))
+				Expect(binding.VolumeMounts[0].Driver).To(Equal(driverName))
 			})
 
 			It("fills in the volume id", func() {
