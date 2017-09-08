@@ -16,6 +16,7 @@ import (
 	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
+	"path"
 )
 
 const (
@@ -35,6 +36,7 @@ type ServiceInstance struct {
 	OrganizationGUID string `json:"organization_guid"`
 	SpaceGUID        string `json:"space_guid"`
 	Name             string
+	VolumeInfo       *csi.VolumeInfo
 }
 
 type lock interface {
@@ -139,6 +141,8 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New(volumeResponseError.Error.String())
 	}
 
+	volInfo := response.GetResult().GetVolumeInfo()
+
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	defer func() {
@@ -152,7 +156,9 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		details.PlanID,
 		details.OrganizationGUID,
 		details.SpaceGUID,
-		configuration.Name}
+		configuration.Name,
+		volInfo,
+	}
 
 	if b.instanceConflicts(instanceDetails, instanceID) {
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
@@ -185,7 +191,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 	}
 	configuration.VolumeId = &csi.VolumeID{Values: map[string]string{"volume_name": instanceID}}
 	configuration.VolumeMetadata = &csi.VolumeMetadata{Values: map[string]string{
-		"plan_id": details.PlanID,
+		"plan_id":    details.PlanID,
 		"service_id": details.ServiceID,
 	}}
 
@@ -216,8 +222,70 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 
 	return brokerapi.DeprovisionServiceSpec{IsAsync: false, OperationData: "deprovision"}, nil
 }
+
 func (b *Broker) Bind(context context.Context, instanceID string, bindingID string, bindDetails brokerapi.BindDetails) (_ brokerapi.Binding, e error) {
-	return brokerapi.Binding{}, nil
+	logger := b.logger.Session("bind")
+	logger.Info("start", lager.Data{"bindingID": bindingID, "details": bindDetails})
+	defer logger.Info("end")
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	defer func() {
+		out := b.store.Save(logger)
+		if e == nil {
+			e = out
+		}
+	}()
+
+	logger.Info("starting-csibroker-bind")
+	instanceDetails, err := b.store.RetrieveInstanceDetails(instanceID)
+	if err != nil {
+		return brokerapi.Binding{}, brokerapi.ErrInstanceDoesNotExist
+	}
+
+	if bindDetails.AppGUID == "" {
+		return brokerapi.Binding{}, brokerapi.ErrAppGuidNotProvided
+	}
+
+	var params map[string]interface{}
+	logger.Debug(fmt.Sprintf("bindDetails: %#v", bindDetails.RawParameters))
+	err = json.Unmarshal(bindDetails.RawParameters, &params)
+	if err != nil {
+		return brokerapi.Binding{}, err
+	}
+	mode, err := evaluateMode(params)
+	if err != nil {
+		return brokerapi.Binding{}, err
+	}
+
+	if b.bindingConflicts(bindingID, bindDetails) {
+		return brokerapi.Binding{}, brokerapi.ErrBindingAlreadyExists
+	}
+
+	logger.Info("retrieved-instance-details", lager.Data{"instanceDetails": instanceDetails})
+
+	err = b.store.CreateBindingDetails(bindingID, bindDetails)
+	if err != nil {
+		return brokerapi.Binding{}, err
+	}
+
+	logger.Info("volume-service-binding", lager.Data{"Driver": "nfsv3driver"})
+
+	volumeId := fmt.Sprintf("%s-volume", instanceID)
+
+	ret := brokerapi.Binding{
+		Credentials: struct{}{}, // if nil, cloud controller chokes on response
+		VolumeMounts: []brokerapi.VolumeMount{{
+			ContainerDir: evaluateContainerPath(params, instanceID),
+			Mode:         mode,
+			Driver:       "csidriver",
+			DeviceType:   "shared",
+			Device: brokerapi.SharedDevice{
+				VolumeId: volumeId,
+			},
+		}},
+	}
+	return ret, nil
 }
 
 func (b *Broker) Unbind(context context.Context, instanceID string, bindingID string, details brokerapi.UnbindDetails) (e error) {
@@ -234,4 +302,35 @@ func (b *Broker) LastOperation(_ context.Context, instanceID string, operationDa
 
 func (b *Broker) instanceConflicts(details ServiceInstance, instanceID string) bool {
 	return b.store.IsInstanceConflict(instanceID, ServiceInstance(details))
+}
+
+func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetails) bool {
+	return b.store.IsBindingConflict(bindingID, details)
+}
+func evaluateContainerPath(parameters map[string]interface{}, volId string) string {
+	if containerPath, ok := parameters["mount"]; ok && containerPath != "" {
+		return containerPath.(string)
+	}
+
+	return path.Join(DefaultContainerPath, volId)
+}
+
+func evaluateMode(parameters map[string]interface{}) (string, error) {
+
+	if ro, ok := parameters["readonly"]; ok {
+		switch ro := ro.(type) {
+		case bool:
+			return readOnlyToMode(ro), nil
+		default:
+			return "", brokerapi.ErrRawParamsInvalid
+		}
+	}
+	return "rw", nil
+}
+
+func readOnlyToMode(ro bool) string {
+	if ro {
+		return "r"
+	}
+	return "rw"
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
-	"bytes"
 )
 
 var _ = Describe("Broker", func() {
@@ -44,6 +43,7 @@ var _ = Describe("Broker", func() {
 		fakeStore = &csibrokerfakes.FakeStore{}
 		fakeCsi = &csi_fake.FakeCsi{}
 		fakeController = &csi_fake.FakeControllerClient{}
+
 		fakeCsi.NewControllerClientReturns(fakeController)
 		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 		conn, err = grpc.Dial(listenAddr, grpc.WithInsecure())
@@ -54,6 +54,8 @@ var _ = Describe("Broker", func() {
 			pwd, err = os.Getwd()
 			Expect(err).ToNot(HaveOccurred())
 			specFilepath = filepath.Join(pwd, "..", "fixtures", "service_spec.json")
+
+			Expect(err).NotTo(HaveOccurred())
 
 			broker, err = csibroker.New(
 				logger,
@@ -88,7 +90,6 @@ var _ = Describe("Broker", func() {
 			Context("when the specfile is not valid", func() {
 				BeforeEach(func() {
 					specFilepath = filepath.Join(pwd, "..", "fixtures", "broken_service_spec.json")
-
 					broker, err = csibroker.New(
 						logger,
 						specFilepath,
@@ -183,6 +184,38 @@ var _ = Describe("Broker", func() {
 				Expect(request).To(Equal(expectedRequest))
 			})
 
+			Context("when creating volume returns volume info", func() {
+				var volInfo *csi.VolumeInfo
+
+				BeforeEach(func() {
+					volInfo = &csi.VolumeInfo{
+						CapacityBytes: uint64(20),
+						AccessMode:    &csi.AccessMode{Mode: csi.AccessMode_SINGLE_NODE_READER_ONLY},
+						Id:            &csi.VolumeID{Values: map[string]string{"volume_name": "abcd"}},
+						Metadata:      &csi.VolumeMetadata{Values: map[string]string{"a": "b"}},
+					}
+					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Result_{
+						Result: &csi.CreateVolumeResponse_Result{
+							VolumeInfo: volInfo,
+						},
+					}}, nil)
+				})
+
+				It("should save it", func() {
+					Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
+
+					expectedServiceInstance := csibroker.ServiceInstance{
+						PlanID:     "CSI-Existing",
+						Name:       "csi-storage",
+						VolumeInfo: volInfo,
+					}
+					Expect(fakeStore.CreateInstanceDetailsCallCount()).To(Equal(1))
+					fakeInstanceID, fakeServiceInstance := fakeStore.CreateInstanceDetailsArgsForCall(0)
+					Expect(fakeInstanceID).To(Equal(instanceID))
+					Expect(fakeServiceInstance).To(Equal(expectedServiceInstance))
+					Expect(fakeStore.SaveCallCount()).Should(BeNumerically(">", 0))
+				})
+			})
 			Context("when the client returns an error", func() {
 				BeforeEach(func() {
 					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Error{}}, nil)
@@ -286,10 +319,10 @@ var _ = Describe("Broker", func() {
 
 		Context(".Deprovision", func() {
 			var (
-				instanceID       string
-				asyncAllowed     bool
+				instanceID         string
+				asyncAllowed       bool
 				deprovisionDetails brokerapi.DeprovisionDetails
-				err           error
+				err                error
 			)
 
 			BeforeEach(func() {
@@ -319,9 +352,6 @@ var _ = Describe("Broker", func() {
 				)
 
 				BeforeEach(func() {
-					configuration := map[string]interface{}{"share": "server:/some-share"}
-					buf := &bytes.Buffer{}
-					_ = json.NewEncoder(buf).Encode(configuration)
 					asyncAllowed = false
 					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{ServiceID: "some-service-id"}, nil)
 					previousSaveCallCount = fakeStore.SaveCallCount()
@@ -338,7 +368,7 @@ var _ = Describe("Broker", func() {
 				It("should send the request to the controller client", func() {
 					expectedRequest := &csi.DeleteVolumeRequest{
 						Version: csibroker.CSIversion,
-						VolumeId:    &csi.VolumeID{
+						VolumeId: &csi.VolumeID{
 							Values: map[string]string{"volume_name": instanceID},
 						},
 						VolumeMetadata: &csi.VolumeMetadata{
@@ -419,6 +449,145 @@ var _ = Describe("Broker", func() {
 						Expect(err).NotTo(HaveOccurred())
 					})
 				})
+			})
+		})
+
+		Context(".Bind", func() {
+			var (
+				instanceID    string
+				serviceID     string
+				bindDetails   brokerapi.BindDetails
+				rawParameters json.RawMessage
+				params        map[string]interface{}
+			)
+
+			BeforeEach(func() {
+				instanceID = "some-instance-id"
+				serviceID = "some-service-id"
+				params = make(map[string]interface{})
+				params["key"] = "value"
+				rawParameters, err = json.Marshal(params)
+
+				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{ServiceID: serviceID}, nil)
+				bindDetails = brokerapi.BindDetails{
+					AppGUID:       "guid",
+					ServiceID:     serviceID,
+					RawParameters: rawParameters,
+				}
+			})
+
+			It("includes empty credentials to prevent CAPI crash", func() {
+				binding, err := broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(binding.Credentials).NotTo(BeNil())
+			})
+
+			It("uses the instance id in the default container path", func() {
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(binding.VolumeMounts[0].ContainerDir).To(Equal("/var/vcap/data/some-instance-id"))
+			})
+
+			It("flows container path through", func() {
+				params["mount"] = "/var/vcap/otherdir/something"
+				bindDetails.RawParameters, err = json.Marshal(params)
+				Expect(err).NotTo(HaveOccurred())
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(binding.VolumeMounts[0].ContainerDir).To(Equal("/var/vcap/otherdir/something"))
+			})
+
+			It("uses rw as its default mode", func() {
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(binding.VolumeMounts[0].Mode).To(Equal("rw"))
+			})
+
+			It("should write state", func() {
+				previousSaveCallCount := fakeStore.SaveCallCount()
+				_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeStore.SaveCallCount()).To(Equal(previousSaveCallCount + 1))
+			})
+
+			It("errors if mode is not a boolean", func() {
+				params["readonly"] = ""
+				bindDetails.RawParameters, err = json.Marshal(params)
+				Expect(err).NotTo(HaveOccurred())
+				_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).To(Equal(brokerapi.ErrRawParamsInvalid))
+			})
+
+			It("fills in the driver name", func() {
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(binding.VolumeMounts[0].Driver).To(Equal("csidriver"))
+			})
+
+			It("fills in the volume id", func() {
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(binding.VolumeMounts[0].Device.VolumeId).To(ContainSubstring("some-instance-id"))
+			})
+
+			Context("when the binding already exists", func() {
+
+				It("doesn't error when binding the same details", func() {
+					fakeStore.IsBindingConflictReturns(false)
+					_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("errors when binding different details", func() {
+					fakeStore.IsBindingConflictReturns(true)
+					_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+					Expect(err).To(Equal(brokerapi.ErrBindingAlreadyExists))
+				})
+			})
+
+			Context("when the binding cannot be stored", func() {
+				var (
+					err error
+				)
+
+				BeforeEach(func() {
+					fakeStore.CreateBindingDetailsReturns(errors.New("badness"))
+					_, err = broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+
+				})
+
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+				})
+
+			})
+
+			Context("when the save fails", func() {
+				var (
+					err error
+				)
+				BeforeEach(func() {
+					fakeStore.SaveReturns(errors.New("badness"))
+					_, err = broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				})
+
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			It("errors when the service instance does not exist", func() {
+				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("Awesome!"))
+				_, err := broker.Bind(ctx, "nonexistent-instance-id", "binding-id", brokerapi.BindDetails{AppGUID: "guid"})
+				Expect(err).To(Equal(brokerapi.ErrInstanceDoesNotExist))
+			})
+
+			It("errors when the app guid is not provided", func() {
+				_, err := broker.Bind(ctx, "some-instance-id", "binding-id", brokerapi.BindDetails{})
+				Expect(err).To(Equal(brokerapi.ErrAppGuidNotProvided))
 			})
 		})
 	})
