@@ -293,6 +293,30 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 }
 
 func (b *Broker) Unbind(context context.Context, instanceID string, bindingID string, details brokerapi.UnbindDetails) (e error) {
+	logger := b.logger.Session("unbind")
+	logger.Info("start")
+	defer logger.Info("end")
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	defer func() {
+		out := b.store.Save(logger)
+		if e == nil {
+			e = out
+		}
+	}()
+
+	if _, err := b.store.RetrieveInstanceDetails(instanceID); err != nil {
+		return brokerapi.ErrInstanceDoesNotExist
+	}
+
+	if _, err := b.store.RetrieveBindingDetails(bindingID); err != nil {
+		return brokerapi.ErrBindingDoesNotExist
+	}
+
+	if err := b.store.DeleteBindingDetails(bindingID); err != nil {
+		return err
+	}
 	return nil
 }
 

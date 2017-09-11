@@ -594,5 +594,72 @@ var _ = Describe("Broker", func() {
 				Expect(err).To(Equal(brokerapi.ErrAppGuidNotProvided))
 			})
 		})
+		Context(".Unbind", func() {
+			var (
+				instanceID    string
+				bindDetails   brokerapi.BindDetails
+				params        map[string]interface{}
+				rawParameters json.RawMessage
+				err           error
+			)
+			BeforeEach(func() {
+				instanceID = "some-instance-id"
+
+				params = make(map[string]interface{})
+				params["key"] = "value"
+				rawParameters, err = json.Marshal(params)
+				Expect(err).NotTo(HaveOccurred())
+
+				bindDetails = brokerapi.BindDetails{AppGUID: "guid", RawParameters: rawParameters}
+
+				fakeStore.RetrieveBindingDetailsReturns(bindDetails, nil)
+			})
+
+			It("unbinds a bound service instance from an app", func() {
+				err := broker.Unbind(ctx, "some-instance-id", "binding-id", brokerapi.UnbindDetails{})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("fails when trying to unbind a instance that has not been provisioned", func() {
+				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("Shazaam!"))
+				err := broker.Unbind(ctx, "some-other-instance-id", "binding-id", brokerapi.UnbindDetails{})
+				Expect(err).To(Equal(brokerapi.ErrInstanceDoesNotExist))
+			})
+
+			It("fails when trying to unbind a binding that has not been bound", func() {
+				fakeStore.RetrieveBindingDetailsReturns(brokerapi.BindDetails{}, errors.New("Hooray!"))
+				err := broker.Unbind(ctx, "some-instance-id", "some-other-binding-id", brokerapi.UnbindDetails{})
+				Expect(err).To(Equal(brokerapi.ErrBindingDoesNotExist))
+			})
+
+			It("should write state", func() {
+				previousCallCount := fakeStore.SaveCallCount()
+				err := broker.Unbind(ctx, "some-instance-id", "binding-id", brokerapi.UnbindDetails{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fakeStore.SaveCallCount()).To(Equal(previousCallCount + 1))
+			})
+
+			Context("when the save fails", func() {
+				BeforeEach(func() {
+					fakeStore.SaveReturns(errors.New("badness"))
+				})
+
+				It("should error", func() {
+					err := broker.Unbind(ctx, "some-instance-id", "binding-id", brokerapi.UnbindDetails{})
+					Expect(err).To(HaveOccurred())
+				})
+			})
+
+			Context("when deletion of the binding details fails", func() {
+				BeforeEach(func() {
+					fakeStore.DeleteBindingDetailsReturns(errors.New("badness"))
+				})
+
+				It("should error", func() {
+					err := broker.Unbind(ctx, "some-instance-id", "binding-id", brokerapi.UnbindDetails{})
+					Expect(err).To(HaveOccurred())
+				})
+			})
+		})
 	})
 })
