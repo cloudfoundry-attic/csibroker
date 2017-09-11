@@ -552,6 +552,16 @@ var _ = Describe("Broker", func() {
 				})
 			})
 
+			Context("when the details are not provided", func() {
+				BeforeEach(func() {
+					bindDetails.RawParameters = nil
+				})
+				It("succeeds", func() {
+					_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+					Expect(err).NotTo(HaveOccurred())
+				})
+			})
+
 			Context("when the binding cannot be stored", func() {
 				var (
 					err error

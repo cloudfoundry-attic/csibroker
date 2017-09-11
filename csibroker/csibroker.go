@@ -251,11 +251,16 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, brokerapi.ErrAppGuidNotProvided
 	}
 
-	var params map[string]interface{}
+	params := make(map[string]interface{})
+
 	logger.Debug(fmt.Sprintf("bindDetails: %#v", bindDetails.RawParameters))
-	err = json.Unmarshal(bindDetails.RawParameters, &params)
-	if err != nil {
-		return brokerapi.Binding{}, err
+
+	if bindDetails.RawParameters != nil {
+		err = json.Unmarshal(bindDetails.RawParameters, &params)
+
+		if err != nil {
+			return brokerapi.Binding{}, err
+		}
 	}
 	mode, err := evaluateMode(params)
 	if err != nil {
