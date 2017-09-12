@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 
 	"code.cloudfoundry.org/goshims/ioutilshim"
-	"github.com/paulcwarren/spec/csishim"
+	"github.com/cloudfoundry/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"

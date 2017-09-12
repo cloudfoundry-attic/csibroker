@@ -13,10 +13,10 @@ import (
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
+	"github.com/cloudfoundry/csishim/csi_fake"
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/paulcwarren/spec"
-	"github.com/paulcwarren/spec/csishim/csi_fake"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
 )
@@ -75,6 +75,7 @@ var _ = Describe("Broker", func() {
 			Context("when the specfile is valid", func() {
 				It("returns the service catalog as appropriate", func() {
 					result := broker.Services(ctx)[0]
+
 					Expect(result.ID).To(Equal("Service.ID"))
 					Expect(result.Name).To(Equal("Service.Name"))
 					Expect(result.Description).To(Equal("Service.Description"))
@@ -174,7 +175,7 @@ var _ = Describe("Broker", func() {
 						LimitBytes:    3,
 					},
 					VolumeCapabilities: []*csi.VolumeCapability{{
-						Value: &csi.VolumeCapability_Mount{
+						AccessType: &csi.VolumeCapability_Mount{
 							Mount: &csi.VolumeCapability_MountVolume{
 								FsType:     "fsType",
 								MountFlags: []string{"-o something", "-t anotherthing"},
@@ -194,9 +195,9 @@ var _ = Describe("Broker", func() {
 				BeforeEach(func() {
 					volInfo = &csi.VolumeInfo{
 						CapacityBytes: uint64(20),
-						AccessMode:    &csi.AccessMode{Mode: csi.AccessMode_SINGLE_NODE_READER_ONLY},
-						Id:            &csi.VolumeID{Values: map[string]string{"volume_name": "abcd"}},
-						Metadata:      &csi.VolumeMetadata{Values: map[string]string{"a": "b"}},
+						Handle: &csi.VolumeHandle{
+							Id: "some-volume-id",
+						},
 					}
 					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Result_{
 						Result: &csi.CreateVolumeResponse_Result{
@@ -357,7 +358,14 @@ var _ = Describe("Broker", func() {
 
 				BeforeEach(func() {
 					asyncAllowed = false
-					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{ServiceID: "some-service-id"}, nil)
+					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{
+						ServiceID: "some-service-id",
+						VolumeInfo: &csi.VolumeInfo{
+							Handle: &csi.VolumeHandle{
+								Id: "some-volume-id",
+							},
+						},
+					}, nil)
 					previousSaveCallCount = fakeStore.SaveCallCount()
 				})
 
@@ -372,12 +380,11 @@ var _ = Describe("Broker", func() {
 				It("should send the request to the controller client", func() {
 					expectedRequest := &csi.DeleteVolumeRequest{
 						Version: csibroker.CSIversion,
-						VolumeId: &csi.VolumeID{
-							Values: map[string]string{"volume_name": instanceID},
+						VolumeHandle: &csi.VolumeHandle{
+							Id:       "some-volume-id",
+							Metadata: map[string]string{},
 						},
-						VolumeMetadata: &csi.VolumeMetadata{
-							Values: map[string]string{"plan_id": "Existing", "service_id": "some-service-id"},
-						},
+						UserCredentials: &csi.Credentials{},
 					}
 					Expect(fakeController.DeleteVolumeCallCount()).To(Equal(1))
 					_, request, _ := fakeController.DeleteVolumeArgsForCall(0)

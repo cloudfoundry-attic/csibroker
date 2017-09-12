@@ -13,9 +13,9 @@ import (
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
+	"github.com/cloudfoundry/csishim"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/jsonpb"
-	csi "github.com/paulcwarren/spec"
-	"github.com/paulcwarren/spec/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
 )
@@ -193,11 +193,17 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 	if details.ServiceID == "" {
 		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires \"service_id\"")
 	}
-	configuration.VolumeId = &csi.VolumeID{Values: map[string]string{"volume_name": instanceID}}
-	configuration.VolumeMetadata = &csi.VolumeMetadata{Values: map[string]string{
-		"plan_id":    details.PlanID,
-		"service_id": details.ServiceID,
-	}}
+
+	instanceDetails, err := b.store.RetrieveInstanceDetails(instanceID)
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
+	}
+
+	configuration.UserCredentials = &csi.Credentials{}
+	configuration.VolumeHandle = &csi.VolumeHandle{
+		Id:       instanceDetails.VolumeInfo.Handle.Id,
+		Metadata: map[string]string{},
+	}
 
 	response, _ := b.controllerClient.DeleteVolume(context, &configuration)
 	volumeResponseError, ok := response.GetReply().(*csi.DeleteVolumeResponse_Error)
@@ -213,11 +219,6 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 			e = out
 		}
 	}()
-
-	_, err := b.store.RetrieveInstanceDetails(instanceID)
-	if err != nil {
-		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
-	}
 
 	err = b.store.DeleteInstanceDetails(instanceID)
 	if err != nil {
