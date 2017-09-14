@@ -10,10 +10,10 @@ import (
 
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csibroker/csibrokerfakes"
+	"code.cloudfoundry.org/csishim/csi_fake"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
-	"github.com/cloudfoundry/csishim/csi_fake"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

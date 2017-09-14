@@ -11,9 +11,9 @@ import (
 	"path"
 
 	"code.cloudfoundry.org/clock"
+	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
-	"github.com/cloudfoundry/csishim"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"

@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/goshims/ioutilshim"
-	"github.com/cloudfoundry/csishim"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"
