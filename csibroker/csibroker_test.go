@@ -9,16 +9,18 @@ import (
 	"strconv"
 
 	"code.cloudfoundry.org/csibroker/csibroker"
-	"code.cloudfoundry.org/csibroker/csibrokerfakes"
 	"code.cloudfoundry.org/csishim/csi_fake"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
+	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
+
+	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore/brokerstorefakes"
 )
 
 var _ = Describe("Broker", func() {
@@ -29,7 +31,7 @@ var _ = Describe("Broker", func() {
 		pwd            string
 		logger         lager.Logger
 		ctx            context.Context
-		fakeStore      *csibrokerfakes.FakeStore
+		fakeStore      *brokerstorefakes.FakeStore
 		fakeCsi        *csi_fake.FakeCsi
 		conn           *grpc.ClientConn
 		fakeController *csi_fake.FakeControllerClient
@@ -41,7 +43,7 @@ var _ = Describe("Broker", func() {
 		logger = lagertest.NewTestLogger("test-broker")
 		ctx = context.TODO()
 		fakeOs = &os_fake.FakeOs{}
-		fakeStore = &csibrokerfakes.FakeStore{}
+		fakeStore = &brokerstorefakes.FakeStore{}
 		fakeCsi = &csi_fake.FakeCsi{}
 		fakeController = &csi_fake.FakeControllerClient{}
 
@@ -151,7 +153,7 @@ var _ = Describe("Broker", func() {
         `
 				provisionDetails = brokerapi.ProvisionDetails{PlanID: "CSI-Existing", RawParameters: json.RawMessage(configuration)}
 				asyncAllowed = false
-				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("not found"))
+				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{}, errors.New("not found"))
 			})
 
 			JustBeforeEach(func() {
@@ -209,10 +211,14 @@ var _ = Describe("Broker", func() {
 				It("should save it", func() {
 					Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
 
-					expectedServiceInstance := csibroker.ServiceInstance{
-						PlanID:     "CSI-Existing",
+					fingerprint := csibroker.ServiceFingerPrint{
 						Name:       "csi-storage",
 						VolumeInfo: volInfo,
+					}
+
+					expectedServiceInstance := brokerstore.ServiceInstance{
+						PlanID:             "CSI-Existing",
+						ServiceFingerPrint: fingerprint,
 					}
 					Expect(fakeStore.CreateInstanceDetailsCallCount()).To(Equal(1))
 					fakeInstanceID, fakeServiceInstance := fakeStore.CreateInstanceDetailsArgsForCall(0)
@@ -343,7 +349,7 @@ var _ = Describe("Broker", func() {
 			Context("when the instance does not exist", func() {
 				BeforeEach(func() {
 					instanceID = "does-not-exist"
-					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, brokerapi.ErrInstanceDoesNotExist)
+					fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{}, brokerapi.ErrInstanceDoesNotExist)
 				})
 
 				It("should fail", func() {
@@ -358,13 +364,19 @@ var _ = Describe("Broker", func() {
 
 				BeforeEach(func() {
 					asyncAllowed = false
-					fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{
-						ServiceID: "some-service-id",
+
+					fingerprint := csibroker.ServiceFingerPrint{
+						Name: "some-csi-storage",
 						VolumeInfo: &csi.VolumeInfo{
 							Handle: &csi.VolumeHandle{
 								Id: "some-volume-id",
 							},
 						},
+					}
+
+					fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{
+						ServiceID:          "some-service-id",
+						ServiceFingerPrint: fingerprint,
 					}, nil)
 					previousSaveCallCount = fakeStore.SaveCallCount()
 				})
@@ -479,7 +491,7 @@ var _ = Describe("Broker", func() {
 				params["key"] = "value"
 				rawParameters, err = json.Marshal(params)
 
-				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{ServiceID: serviceID}, nil)
+				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{ServiceID: serviceID}, nil)
 				bindDetails = brokerapi.BindDetails{
 					AppGUID:       "guid",
 					ServiceID:     serviceID,
@@ -601,7 +613,7 @@ var _ = Describe("Broker", func() {
 			})
 
 			It("errors when the service instance does not exist", func() {
-				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("Awesome!"))
+				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{}, errors.New("Awesome!"))
 				_, err := broker.Bind(ctx, "nonexistent-instance-id", "binding-id", brokerapi.BindDetails{AppGUID: "guid"})
 				Expect(err).To(Equal(brokerapi.ErrInstanceDoesNotExist))
 			})
@@ -638,7 +650,7 @@ var _ = Describe("Broker", func() {
 			})
 
 			It("fails when trying to unbind a instance that has not been provisioned", func() {
-				fakeStore.RetrieveInstanceDetailsReturns(csibroker.ServiceInstance{}, errors.New("Shazaam!"))
+				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{}, errors.New("Shazaam!"))
 				err := broker.Unbind(ctx, "some-other-instance-id", "binding-id", brokerapi.UnbindDetails{})
 				Expect(err).To(Equal(brokerapi.ErrInstanceDoesNotExist))
 			})

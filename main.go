@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 
@@ -16,7 +18,7 @@ import (
 	"path/filepath"
 
 	"code.cloudfoundry.org/csishim"
-	"code.cloudfoundry.org/goshims/ioutilshim"
+	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"
@@ -66,8 +68,50 @@ var driverName = flag.String(
 	"[REQUIRED] - driver name of CSI plugin",
 )
 
+var dbDriver = flag.String(
+	"dbDriver",
+	"",
+	"(optional) database driver name when using SQL to store broker state",
+)
+
+var dbHostname = flag.String(
+	"dbHostname",
+	"",
+	"(optional) database hostname when using SQL to store broker state",
+)
+var dbPort = flag.String(
+	"dbPort",
+	"",
+	"(optional) database port when using SQL to store broker state",
+)
+
+var dbName = flag.String(
+	"dbName",
+	"",
+	"(optional) database name when using SQL to store broker state",
+)
+
+var dbCACert = flag.String(
+	"dbCACert",
+	"",
+	"(optional) CA Cert to verify SSL connection",
+)
+
+var cfServiceName = flag.String(
+	"cfServiceName",
+	"",
+	"(optional) For CF pushed apps, the service name in VCAP_SERVICES where we should find database credentials.  dbDriver must be defined if this option is set, but all other db parameters will be extracted from the service binding.",
+)
+
+var (
+	dbUsername string
+	dbPassword string
+)
+
 func main() {
 	parseCommandLine()
+	parseEnvironment()
+
 	checkParams()
 
 	sink, err := lager.NewRedactingWriterSink(os.Stdout, lager.DEBUG, nil, nil)
@@ -99,11 +143,12 @@ func parseCommandLine() {
 }
 
 func checkParams() {
-	if *dataDir == "" {
-		fmt.Fprint(os.Stderr, "\nERROR:dataDir must be provided.\n\n")
+	if *dataDir == "" && *dbDriver == "" {
+		fmt.Fprint(os.Stderr, "\nERROR: Either dataDir or db parameters must be provided.\n\n")
 		flag.Usage()
 		os.Exit(1)
 	}
+
 	if *csiConAddr == "" {
 		fmt.Fprint(os.Stderr, "\nERROR:csiConAddr must be provided.\n\n")
 		flag.Usage()
@@ -122,11 +167,58 @@ func checkParams() {
 
 }
 
+func parseVcapServices(logger lager.Logger, os osshim.Os) {
+	if *dbDriver == "" {
+		logger.Fatal("missing-db-driver-parameter", errors.New("dbDriver parameter is required for cf deployed broker"))
+	}
+
+	// populate db parameters from VCAP_SERVICES and pitch a fit if there isn't one.
+	services, hasValue := os.LookupEnv("VCAP_SERVICES")
+	if !hasValue {
+		logger.Fatal("missing-vcap-services-environment", errors.New("missing VCAP_SERVICES environment"))
+	}
+
+	stuff := map[string][]interface{}{}
+	err := json.Unmarshal([]byte(services), &stuff)
+	if err != nil {
+		logger.Fatal("json-unmarshal-error", err)
+	}
+
+	stuff2, ok := stuff[*cfServiceName]
+	if !ok {
+		logger.Fatal("missing-service-binding", errors.New("VCAP_SERVICES missing specified db service"), lager.Data{"stuff": stuff})
+	}
+
+	stuff3 := stuff2[0].(map[string]interface{})
+
+	credentials := stuff3["credentials"].(map[string]interface{})
+	logger.Debug("credentials-parsed", lager.Data{"credentials": credentials})
+
+	dbUsername = credentials["username"].(string)
+	dbPassword = credentials["password"].(string)
+	*dbHostname = credentials["hostname"].(string)
+	if *dbPort, ok = credentials["port"].(string); !ok {
+		*dbPort = fmt.Sprintf("%.0f", credentials["port"].(float64))
+	}
+	*dbName = credentials["name"].(string)
+}
+
+func parseEnvironment() {
+	dbUsername, _ = os.LookupEnv("DB_USERNAME")
+	dbPassword, _ = os.LookupEnv("DB_PASSWORD")
+}
+
 func createServer(logger lager.Logger) ifrit.Runner {
 	fileName := filepath.Join(*dataDir, "csi-general-services.json")
 
 	logger.Debug("csiConAddress: " + *csiConAddr)
-	store := csibroker.NewFileStore(fileName, &ioutilshim.IoutilShim{})
+
+	// if we are CF pushed
+	if *cfServiceName != "" {
+		parseVcapServices(logger, &osshim.OsShim{})
+	}
+
+	store := brokerstore.NewStore(logger, *dbDriver, dbUsername, dbPassword, *dbHostname, *dbPort, *dbName, *dbCACert, fileName)
 	conn, err := grpc.Dial(*csiConAddr, grpc.WithInsecure())
 
 	if err != nil {

@@ -1,4 +1,4 @@
-package main_test
+package main
 
 import (
 	"io"
@@ -6,6 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+
+	"code.cloudfoundry.org/goshims/osshim/os_fake"
+	"code.cloudfoundry.org/lager"
+	"code.cloudfoundry.org/lager/lagertest"
 
 	"encoding/json"
 	"io/ioutil"
@@ -132,14 +136,87 @@ var _ = Describe("csibroker Main", func() {
 		driverName = "some-csi-driver"
 	})
 
+	Context("Parse VCAP_SERVICES tests", func() {
+		var (
+			port   string
+			fakeOs os_fake.FakeOs = os_fake.FakeOs{}
+			logger lager.Logger
+		)
+
+		BeforeEach(func() {
+			*dbDriver = "postgres"
+			*cfServiceName = "postgresql"
+			logger = lagertest.NewTestLogger("test-broker-main")
+		})
+		JustBeforeEach(func() {
+			env := fmt.Sprintf(`
+				{
+					"postgresql":[
+						{
+							"credentials":{
+								"dbType":"postgresql",
+								"hostname":"8.8.8.8",
+								"name":"foo",
+								"password":"foo",
+								"port":%s,
+								"uri":"postgresql://foo:foo@8.8.8.8:9999/foo",
+								"username":"foo"
+							},
+							"label":"postgresql",
+							"name":"foobroker",
+							"plan":"amanaplanacanalpanama",
+							"provider":null,
+							"syslog_drain_url":null,
+							"tags":[
+								"postgresql",
+								"cache"
+							],
+							"volume_mounts":[]
+						}
+					]
+				}`, port)
+			fakeOs.LookupEnvReturns(env, true)
+		})
+
+		Context("when port is a string", func() {
+			BeforeEach(func() {
+				port = `"9999"`
+			})
+
+			It("should succeed", func() {
+				Expect(func() { parseVcapServices(logger, &fakeOs) }).NotTo(Panic())
+				Expect(*dbPort).To(Equal("9999"))
+			})
+		})
+		Context("when port is a number", func() {
+			BeforeEach(func() {
+				port = `9999`
+			})
+
+			It("should succeed", func() {
+				Expect(func() { parseVcapServices(logger, &fakeOs) }).NotTo(Panic())
+				Expect(*dbPort).To(Equal("9999"))
+			})
+		})
+		Context("when port is an array", func() {
+			BeforeEach(func() {
+				port = `[9999]`
+			})
+
+			It("should panic", func() {
+				Expect(func() { parseVcapServices(logger, &fakeOs) }).To(Panic())
+			})
+		})
+	})
+
 	Context("Missing required args", func() {
 		var process ifrit.Process
-		It("shows usage to include dataDir", func() {
+		It("shows usage to include dataDir or db parameters", func() {
 			var args []string
 			volmanRunner := failRunner{
-				Name:       "nfsbroker",
+				Name:       "csibroker",
 				Command:    exec.Command(binaryPath, args...),
-				StartCheck: "dataDir must be provided.",
+				StartCheck: "Either dataDir or db parameters must be provided",
 			}
 			process = ifrit.Invoke(volmanRunner)
 
@@ -149,7 +226,7 @@ var _ = Describe("csibroker Main", func() {
 			var args []string
 			args = append(args, "-dataDir", tempDir)
 			volmanRunner := failRunner{
-				Name:       "nfsbroker",
+				Name:       "csibroker",
 				Command:    exec.Command(binaryPath, args...),
 				StartCheck: "csiConAddr must be provided.",
 			}
@@ -162,7 +239,7 @@ var _ = Describe("csibroker Main", func() {
 			args = append(args, "-dataDir", tempDir)
 			args = append(args, "-csiConAddr", csiConAddr)
 			volmanRunner := failRunner{
-				Name:       "nfsbroker",
+				Name:       "csibroker",
 				Command:    exec.Command(binaryPath, args...),
 				StartCheck: "serviceSpec must be provided.",
 			}
@@ -176,7 +253,7 @@ var _ = Describe("csibroker Main", func() {
 			args = append(args, "-csiConAddr", csiConAddr)
 			args = append(args, "-serviceSpec", specFilepath)
 			volmanRunner := failRunner{
-				Name:       "nfsbroker",
+				Name:       "csibroker",
 				Command:    exec.Command(binaryPath, args...),
 				StartCheck: "driverName must be provided.",
 			}

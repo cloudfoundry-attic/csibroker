@@ -14,9 +14,11 @@ import (
 	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
+	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
+
 	"google.golang.org/grpc"
 )
 
@@ -31,13 +33,9 @@ var CSIversion = &csi.Version{
 	Patch: 1,
 }
 
-type ServiceInstance struct {
-	ServiceID        string `json:"service_id"`
-	PlanID           string `json:"plan_id"`
-	OrganizationGUID string `json:"organization_guid"`
-	SpaceGUID        string `json:"space_guid"`
-	Name             string
-	VolumeInfo       *csi.VolumeInfo
+type ServiceFingerPrint struct {
+	Name       string
+	VolumeInfo *csi.VolumeInfo
 }
 
 type lock interface {
@@ -51,7 +49,7 @@ type Broker struct {
 	mutex            lock
 	clock            clock.Clock
 	service          *brokerapi.Service
-	store            Store
+	store            brokerstore.Store
 	csi              csishim.Csi
 	controllerClient csi.ControllerClient
 	driverName       string
@@ -62,7 +60,7 @@ func New(
 	serviceSpecPath string,
 	os osshim.Os,
 	clock clock.Clock,
-	store Store,
+	store brokerstore.Store,
 	csi csishim.Csi,
 	conn *grpc.ClientConn,
 	driverName string,
@@ -155,13 +153,17 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 			e = out
 		}
 	}()
-	instanceDetails := ServiceInstance{
+
+	fingerprint := ServiceFingerPrint{
+		configuration.Name,
+		volInfo,
+	}
+	instanceDetails := brokerstore.ServiceInstance{
 		details.ServiceID,
 		details.PlanID,
 		details.OrganizationGUID,
 		details.SpaceGUID,
-		configuration.Name,
-		volInfo,
+		fingerprint,
 	}
 
 	if b.instanceConflicts(instanceDetails, instanceID) {
@@ -200,8 +202,15 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 	}
 
 	configuration.UserCredentials = &csi.Credentials{}
+
+	fingerprint, ok := instanceDetails.ServiceFingerPrint.(ServiceFingerPrint)
+
+	if !ok {
+		return brokerapi.DeprovisionServiceSpec{}, errors.New("failed casting service fingerprint")
+	}
+
 	configuration.VolumeHandle = &csi.VolumeHandle{
-		Id:       instanceDetails.VolumeInfo.Handle.Id,
+		Id:       fingerprint.VolumeInfo.Handle.Id,
 		Metadata: map[string]string{},
 	}
 
@@ -334,8 +343,8 @@ func (b *Broker) LastOperation(_ context.Context, instanceID string, operationDa
 	return brokerapi.LastOperation{}, nil
 }
 
-func (b *Broker) instanceConflicts(details ServiceInstance, instanceID string) bool {
-	return b.store.IsInstanceConflict(instanceID, ServiceInstance(details))
+func (b *Broker) instanceConflicts(details brokerstore.ServiceInstance, instanceID string) bool {
+	return b.store.IsInstanceConflict(instanceID, brokerstore.ServiceInstance(details))
 }
 
 func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetails) bool {
