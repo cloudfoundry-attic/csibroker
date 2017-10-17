@@ -13,14 +13,13 @@ import (
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
-	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
+	"code.cloudfoundry.org/service-broker-store/brokerstore"
+	"code.cloudfoundry.org/service-broker-store/brokerstore/brokerstorefakes"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
-
-	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore/brokerstorefakes"
 )
 
 var _ = Describe("Broker", func() {

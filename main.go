@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 
 	"code.cloudfoundry.org/csishim"
-	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
+	"code.cloudfoundry.org/service-broker-store/brokerstore"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"

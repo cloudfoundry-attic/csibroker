@@ -14,7 +14,7 @@ import (
 	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
-	"github.com/cloudfoundry-incubator/service-broker-store/brokerstore"
+	"code.cloudfoundry.org/service-broker-store/brokerstore"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
