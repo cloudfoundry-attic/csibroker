@@ -72,6 +72,33 @@ var _ = Describe("Broker", func() {
 			)
 		})
 
+		It("probes the controller", func() {
+			_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+			Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+			Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		Context("when the client receives an error after calling the probe", func() {
+			BeforeEach(func() {
+				fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{Reply: &csi.ControllerProbeResponse_Error{}}, nil)
+				broker, err = csibroker.New(
+					logger,
+					specFilepath,
+					fakeOs,
+					nil,
+					fakeStore,
+					fakeCsi,
+					conn,
+					driverName,
+				)
+			})
+
+			It("should error", func() {
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
 		Context(".Services", func() {
 			Context("when the specfile is valid", func() {
 				It("returns the service catalog as appropriate", func() {

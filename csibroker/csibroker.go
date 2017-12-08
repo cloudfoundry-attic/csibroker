@@ -61,7 +61,7 @@ func New(
 	os osshim.Os,
 	clock clock.Clock,
 	store brokerstore.Store,
-	csi csishim.Csi,
+	csishim csishim.Csi,
 	conn *grpc.ClientConn,
 	driverName string,
 ) (*Broker, error) {
@@ -91,6 +91,12 @@ func New(
 		logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "brokerService": brokerService})
 		return &Broker{}, err
 	}
+	newController := csishim.NewControllerClient(conn)
+	response, _ := newController.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
+	volumeResponseError, ok := response.GetReply().(*csi.ControllerProbeResponse_Error)
+	if ok {
+		return &Broker{}, errors.New(volumeResponseError.Error.String())
+	}
 
 	theBroker := Broker{
 		logger:           logger,
@@ -98,8 +104,8 @@ func New(
 		mutex:            &sync.Mutex{},
 		clock:            clock,
 		store:            store,
-		csi:              csi,
-		controllerClient: csi.NewControllerClient(conn),
+		csi:              csishim,
+		controllerClient: newController,
 		service:          brokerService,
 		driverName:       driverName,
 	}
@@ -137,7 +143,7 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
 
-	response, err := b.controllerClient.CreateVolume(context, &configuration)
+	response, _ := b.controllerClient.CreateVolume(context, &configuration)
 	volumeResponseError, ok := response.GetReply().(*csi.CreateVolumeResponse_Error)
 	if ok {
 		return brokerapi.ProvisionedServiceSpec{}, errors.New(volumeResponseError.Error.String())
