@@ -74,7 +74,7 @@ func New(
 
 	if err != nil {
 		logger.Error("failed-to-read-service-spec", err, lager.Data{"fileName": serviceSpecPath})
-		return &Broker{}, err
+		return nil, err
 	}
 
 	brokerService := &brokerapi.Service{}
@@ -82,21 +82,22 @@ func New(
 	err = json.Unmarshal(serviceSpec, brokerService)
 	if err != nil {
 		logger.Error("failed-to-unmarshall-spec from spec-file", err, lager.Data{"fileName": serviceSpecPath})
-		return &Broker{}, err
+		return nil, err
 	}
 	logger.Info("spec-loaded", lager.Data{"fileName": serviceSpecPath})
 
 	if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
 		err = errors.New("Not an valid specfile")
 		logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "brokerService": brokerService})
-		return &Broker{}, err
+		return nil, err
 	}
 	newController := csishim.NewControllerClient(conn)
-	response, _ := newController.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
-	volumeResponseError, ok := response.GetReply().(*csi.ControllerProbeResponse_Error)
-	if ok {
-		return &Broker{}, errors.New(volumeResponseError.Error.String())
-	}
+
+	// TODO--move this elsewhere...
+	//_, err = newController.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	theBroker := Broker{
 		logger:           logger,
@@ -143,13 +144,12 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
 
-	response, _ := b.controllerClient.CreateVolume(context, &configuration)
-	volumeResponseError, ok := response.GetReply().(*csi.CreateVolumeResponse_Error)
-	if ok {
-		return brokerapi.ProvisionedServiceSpec{}, errors.New(volumeResponseError.Error.String())
+	response, err := b.controllerClient.CreateVolume(context, &configuration)
+	if err != nil {
+		return brokerapi.ProvisionedServiceSpec{}, err
 	}
 
-	volInfo := response.GetResult().GetVolumeInfo()
+	volInfo := response.GetVolumeInfo()
 
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -207,7 +207,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
 	}
 
-	configuration.UserCredentials = &csi.Credentials{}
+	configuration.UserCredentials = map[string]string{}
 
 	fingerprint, ok := instanceDetails.ServiceFingerPrint.(ServiceFingerPrint)
 
@@ -215,15 +215,11 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, errors.New("failed casting service fingerprint")
 	}
 
-	configuration.VolumeHandle = &csi.VolumeHandle{
-		Id:       fingerprint.VolumeInfo.Handle.Id,
-		Metadata: map[string]string{},
-	}
+	configuration.VolumeId = fingerprint.VolumeInfo.Id
 
-	response, _ := b.controllerClient.DeleteVolume(context, &configuration)
-	volumeResponseError, ok := response.GetReply().(*csi.DeleteVolumeResponse_Error)
-	if ok {
-		return brokerapi.DeprovisionServiceSpec{}, errors.New(volumeResponseError.Error.String())
+	_, err = b.controllerClient.DeleteVolume(context, &configuration)
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 
 	b.mutex.Lock()

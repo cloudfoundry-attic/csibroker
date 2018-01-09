@@ -222,7 +222,7 @@ func createServer(logger lager.Logger) ifrit.Runner {
 	conn, err := grpc.Dial(*csiConAddr, grpc.WithInsecure())
 
 	if err != nil {
-		logger.Error("Cannot reach csi plugin", err)
+		logger.Error("cannot-reach-csi-plugin", err)
 		os.Exit(1)
 	}
 
@@ -232,7 +232,7 @@ func createServer(logger lager.Logger) ifrit.Runner {
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
 
 	if err != nil {
-		logger.Error("csibroker initialize error", err)
+		logger.Error("csibroker-initialize-error", err)
 		os.Exit(1)
 	}
 

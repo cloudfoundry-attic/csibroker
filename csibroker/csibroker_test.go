@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 )
 
 var _ = Describe("Broker", func() {
@@ -72,7 +73,8 @@ var _ = Describe("Broker", func() {
 			)
 		})
 
-		It("probes the controller", func() {
+		/* TODO--how will we ensure that probe is safe to call on initialization?
+		It("s theprobe controller", func() {
 			_, request, _ := fakeController.ControllerProbeArgsForCall(0)
 			Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
 			Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
@@ -81,7 +83,7 @@ var _ = Describe("Broker", func() {
 
 		Context("when the client receives an error after calling the probe", func() {
 			BeforeEach(func() {
-				fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{Reply: &csi.ControllerProbeResponse_Error{}}, nil)
+				fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
 				broker, err = csibroker.New(
 					logger,
 					specFilepath,
@@ -98,6 +100,7 @@ var _ = Describe("Broker", func() {
 				Expect(err).To(HaveOccurred())
 			})
 		})
+		*/
 
 		Context(".Services", func() {
 			Context("when the specfile is valid", func() {
@@ -223,15 +226,9 @@ var _ = Describe("Broker", func() {
 				BeforeEach(func() {
 					volInfo = &csi.VolumeInfo{
 						CapacityBytes: uint64(20),
-						Handle: &csi.VolumeHandle{
-							Id: "some-volume-id",
-						},
-					}
-					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Result_{
-						Result: &csi.CreateVolumeResponse_Result{
-							VolumeInfo: volInfo,
-						},
-					}}, nil)
+						Id: "some-volume-id",
+						}
+					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{VolumeInfo: volInfo}, nil)
 				})
 
 				It("should save it", func() {
@@ -255,7 +252,7 @@ var _ = Describe("Broker", func() {
 			})
 			Context("when the client returns an error", func() {
 				BeforeEach(func() {
-					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Reply: &csi.CreateVolumeResponse_Error{}}, nil)
+					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
 				})
 
 				It("should error", func() {
@@ -393,11 +390,7 @@ var _ = Describe("Broker", func() {
 
 					fingerprint := csibroker.ServiceFingerPrint{
 						Name: "some-csi-storage",
-						VolumeInfo: &csi.VolumeInfo{
-							Handle: &csi.VolumeHandle{
-								Id: "some-volume-id",
-							},
-						},
+						VolumeInfo: &csi.VolumeInfo{Id: "some-volume-id"},
 					}
 
 					fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{
@@ -418,11 +411,8 @@ var _ = Describe("Broker", func() {
 				It("should send the request to the controller client", func() {
 					expectedRequest := &csi.DeleteVolumeRequest{
 						Version: csibroker.CSIversion,
-						VolumeHandle: &csi.VolumeHandle{
-							Id:       "some-volume-id",
-							Metadata: map[string]string{},
-						},
-						UserCredentials: &csi.Credentials{},
+						VolumeId:       "some-volume-id",
+						UserCredentials: map[string]string{},
 					}
 					Expect(fakeController.DeleteVolumeCallCount()).To(Equal(1))
 					_, request, _ := fakeController.DeleteVolumeArgsForCall(0)
@@ -431,7 +421,7 @@ var _ = Describe("Broker", func() {
 
 				Context("when the client returns an error", func() {
 					BeforeEach(func() {
-						fakeController.DeleteVolumeReturns(&csi.DeleteVolumeResponse{Reply: &csi.DeleteVolumeResponse_Error{}}, nil)
+						fakeController.DeleteVolumeReturns(&csi.DeleteVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
 					})
 
 					It("should error", func() {
