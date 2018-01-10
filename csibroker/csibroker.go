@@ -53,6 +53,7 @@ type Broker struct {
 	csi              csishim.Csi
 	controllerClient csi.ControllerClient
 	driverName       string
+	controllerProbed bool
 }
 
 func New(
@@ -87,17 +88,11 @@ func New(
 	logger.Info("spec-loaded", lager.Data{"fileName": serviceSpecPath})
 
 	if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
-		err = errors.New("Not an valid specfile")
+		err = errors.New("Not a valid specfile")
 		logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "brokerService": brokerService})
 		return nil, err
 	}
 	newController := csishim.NewControllerClient(conn)
-
-	// TODO--move this elsewhere...
-	//_, err = newController.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	theBroker := Broker{
 		logger:           logger,
@@ -109,6 +104,7 @@ func New(
 		controllerClient: newController,
 		service:          brokerService,
 		driverName:       driverName,
+		controllerProbed: false,
 	}
 
 	return &theBroker, nil
@@ -123,6 +119,10 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
+	err := b.probeController()
+	if err != nil {
+		return brokerapi.ProvisionedServiceSpec{}, err
+	}
 	logger := b.logger.Session("provision").WithData(lager.Data{"instanceID": instanceID, "details": details})
 	logger.Info("start")
 	defer logger.Info("end")
@@ -130,7 +130,7 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 	var configuration csi.CreateVolumeRequest
 
 	logger.Debug("provision-raw-parameters", lager.Data{"RawParameters": details.RawParameters})
-	err := jsonpb.UnmarshalString(string(details.RawParameters), &configuration)
+	err = jsonpb.UnmarshalString(string(details.RawParameters), &configuration)
 	if err != nil {
 		logger.Error("provision-raw-parameters-decode-error", err)
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
@@ -185,6 +185,10 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 }
 
 func (b *Broker) Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (_ brokerapi.DeprovisionServiceSpec, e error) {
+	err := b.probeController()
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, err
+	}
 	logger := b.logger.Session("deprovision")
 	logger.Info("start")
 	defer logger.Info("end")
@@ -240,6 +244,10 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 }
 
 func (b *Broker) Bind(context context.Context, instanceID string, bindingID string, bindDetails brokerapi.BindDetails) (_ brokerapi.Binding, e error) {
+	err := b.probeController()
+	if err != nil {
+		return brokerapi.Binding{}, err
+	}
 	logger := b.logger.Session("bind")
 	logger.Info("start", lager.Data{"bindingID": bindingID, "details": bindDetails})
 	defer logger.Info("end")
@@ -310,6 +318,10 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 }
 
 func (b *Broker) Unbind(context context.Context, instanceID string, bindingID string, details brokerapi.UnbindDetails) (e error) {
+	err := b.probeController()
+	if err != nil {
+		return err
+	}
 	logger := b.logger.Session("unbind")
 	logger.Info("start")
 	defer logger.Info("end")
@@ -352,6 +364,18 @@ func (b *Broker) instanceConflicts(details brokerstore.ServiceInstance, instance
 func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetails) bool {
 	return b.store.IsBindingConflict(bindingID, details)
 }
+
+func (b *Broker) probeController() error {
+	if (!b.controllerProbed) {
+		_, err := b.controllerClient.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
+		if err != nil {
+			return err
+		}
+		b.controllerProbed = true
+	}
+	return nil
+}
+
 func evaluateContainerPath(parameters map[string]interface{}, volId string) string {
 	if containerPath, ok := parameters["mount"]; ok && containerPath != "" {
 		return containerPath.(string)

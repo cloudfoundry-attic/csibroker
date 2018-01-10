@@ -73,35 +73,6 @@ var _ = Describe("Broker", func() {
 			)
 		})
 
-		/* TODO--how will we ensure that probe is safe to call on initialization?
-		It("s theprobe controller", func() {
-			_, request, _ := fakeController.ControllerProbeArgsForCall(0)
-			Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
-			Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
-			Expect(err).ToNot(HaveOccurred())
-		})
-
-		Context("when the client receives an error after calling the probe", func() {
-			BeforeEach(func() {
-				fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
-				broker, err = csibroker.New(
-					logger,
-					specFilepath,
-					fakeOs,
-					nil,
-					fakeStore,
-					fakeCsi,
-					conn,
-					driverName,
-				)
-			})
-
-			It("should error", func() {
-				Expect(err).To(HaveOccurred())
-			})
-		})
-		*/
-
 		Context(".Services", func() {
 			Context("when the specfile is valid", func() {
 				It("returns the service catalog as appropriate", func() {
@@ -138,7 +109,7 @@ var _ = Describe("Broker", func() {
 				})
 
 				It("returns an error", func() {
-					Expect(err).To(Equal(errors.New("Not an valid specfile")))
+					Expect(err).To(Equal(errors.New("Not a valid specfile")))
 				})
 			})
 
@@ -187,6 +158,37 @@ var _ = Describe("Broker", func() {
 
 			JustBeforeEach(func() {
 				spec, err = broker.Provision(ctx, instanceID, provisionDetails, asyncAllowed)
+			})
+
+			Context("if the controller has not been probed yet", func() {
+				It("probes the controller", func() {
+					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				Context("if the probe fails", func() {
+					BeforeEach(func() {
+						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+					})
+
+					It("should error", func() {
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
+					})
+				})
+			})
+
+			Context("if the controller has been probed already", func() {
+				JustBeforeEach(func() {
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
+				})
+
+				It("does not probe the controller again for any future calls", func() {
+					broker.Provision(ctx, instanceID, provisionDetails, asyncAllowed)
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
 			})
 
 			It("should not error", func() {
@@ -369,6 +371,37 @@ var _ = Describe("Broker", func() {
 				_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
 			})
 
+			Context("if the controller has not been probed yet", func() {
+				It("probes the controller", func() {
+					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				Context("if the probe fails", func() {
+					BeforeEach(func() {
+						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+					})
+
+					It("should error", func() {
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
+					})
+				})
+			})
+
+			Context("if the controller has been probed already", func() {
+				JustBeforeEach(func() {
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
+				})
+
+				It("does not probe the controller again for any future calls", func() {
+					_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+			})
+
 			Context("when the instance does not exist", func() {
 				BeforeEach(func() {
 					instanceID = "does-not-exist"
@@ -515,6 +548,41 @@ var _ = Describe("Broker", func() {
 				}
 			})
 
+			Context("if the controller has not been probed yet", func() {
+				It("probes the controller", func() {
+					broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				Context("if the probe fails", func() {
+					BeforeEach(func() {
+						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+					})
+
+					It("should error", func() {
+						_, err = broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
+					})
+				})
+			})
+
+			Context("if the controller has been probed already", func() {
+				JustBeforeEach(func() {
+					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
+					_, err = broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				It("does not probe the controller again for any future calls", func() {
+					broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+			})
+
 			It("includes empty credentials to prevent CAPI crash", func() {
 				binding, err := broker.Bind(ctx, instanceID, "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
@@ -639,6 +707,7 @@ var _ = Describe("Broker", func() {
 				Expect(err).To(Equal(brokerapi.ErrAppGuidNotProvided))
 			})
 		})
+
 		Context(".Unbind", func() {
 			var (
 				instanceID    string
@@ -658,6 +727,41 @@ var _ = Describe("Broker", func() {
 				bindDetails = brokerapi.BindDetails{AppGUID: "guid", RawParameters: rawParameters}
 
 				fakeStore.RetrieveBindingDetailsReturns(bindDetails, nil)
+			})
+
+			Context("if the controller has not been probed yet", func() {
+				It("probes the controller", func() {
+					broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
+					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				Context("if the probe fails", func() {
+					BeforeEach(func() {
+						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+					})
+
+					It("should error", func() {
+						err = broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
+					})
+				})
+			})
+
+			Context("if the controller has been probed already", func() {
+				JustBeforeEach(func() {
+					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
+					err = broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
+				It("does not probe the controller again for any future calls", func() {
+					broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
 			})
 
 			It("unbinds a bound service instance from an app", func() {
