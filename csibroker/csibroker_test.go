@@ -426,9 +426,16 @@ var _ = Describe("Broker", func() {
 						VolumeInfo: &csi.VolumeInfo{Id: "some-volume-id"},
 					}
 
+					// simulate untyped data loaded from a data file
+					jsonFingerprint := &map[string]interface{}{}
+					raw, err := json.Marshal(fingerprint)
+					Expect(err).ToNot(HaveOccurred())
+					err = json.Unmarshal(raw, jsonFingerprint)
+					Expect(err).ToNot(HaveOccurred())
+
 					fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{
 						ServiceID:          "some-service-id",
-						ServiceFingerPrint: fingerprint,
+						ServiceFingerPrint: jsonFingerprint,
 					}, nil)
 					previousSaveCallCount = fakeStore.SaveCallCount()
 				})
@@ -540,7 +547,26 @@ var _ = Describe("Broker", func() {
 				params["key"] = "value"
 				rawParameters, err = json.Marshal(params)
 
-				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{ServiceID: serviceID}, nil)
+				fingerprint := csibroker.ServiceFingerPrint{
+					Name: "some-csi-storage",
+					VolumeInfo: &csi.VolumeInfo{
+						Id: instanceID,
+						Attributes: map[string]string{"foo":"bar"},
+					},
+				}
+
+				// simulate untyped data loaded from a data file
+				jsonFingerprint := &map[string]interface{}{}
+				raw, err := json.Marshal(fingerprint)
+				Expect(err).ToNot(HaveOccurred())
+				err = json.Unmarshal(raw, jsonFingerprint)
+				Expect(err).ToNot(HaveOccurred())
+
+				fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{
+					ServiceID:          serviceID,
+					ServiceFingerPrint: jsonFingerprint,
+				}, nil)
+
 				bindDetails = brokerapi.BindDetails{
 					AppGUID:       "guid",
 					ServiceID:     serviceID,
@@ -588,6 +614,19 @@ var _ = Describe("Broker", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(binding.Credentials).NotTo(BeNil())
+			})
+
+			It("includes csi volume info in the service binding", func() {
+				binding, err := broker.Bind(ctx, instanceID, "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(binding.VolumeMounts).NotTo(BeEmpty())
+				Expect(binding.VolumeMounts[0].Device.MountConfig).NotTo(BeEmpty())
+				Expect(binding.VolumeMounts[0].Device.MountConfig["id"]).To(Equal(instanceID))
+				Expect(binding.VolumeMounts[0].Device.MountConfig["attributes"]).ToNot(BeEmpty())
+				attr, _ := binding.VolumeMounts[0].Device.MountConfig["attributes"].(map[string]string)
+				Expect(attr).ToNot(BeNil())
+				Expect(attr["foo"]).To(Equal("bar"))
 			})
 
 			It("uses the instance id in the default container path", func() {

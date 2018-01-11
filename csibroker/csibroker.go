@@ -213,10 +213,10 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 
 	configuration.UserCredentials = map[string]string{}
 
-	fingerprint, ok := instanceDetails.ServiceFingerPrint.(ServiceFingerPrint)
+	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
 
-	if !ok {
-		return brokerapi.DeprovisionServiceSpec{}, errors.New("failed casting service fingerprint")
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 
 	configuration.VolumeId = fingerprint.VolumeInfo.Id
@@ -271,6 +271,15 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, brokerapi.ErrAppGuidNotProvided
 	}
 
+	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
+
+	if err != nil {
+		return brokerapi.Binding{}, err
+	}
+
+	csiVolumeId := fingerprint.VolumeInfo.Id
+	csiVolumeAttributes := fingerprint.VolumeInfo.Attributes
+
 	params := make(map[string]interface{})
 
 	logger.Debug(fmt.Sprintf("bindDetails: %#v", bindDetails.RawParameters))
@@ -298,8 +307,6 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, err
 	}
 
-	logger.Info("volume-service-binding", lager.Data{"Driver": "nfsv3driver"})
-
 	volumeId := fmt.Sprintf("%s-volume", instanceID)
 
 	ret := brokerapi.Binding{
@@ -311,6 +318,10 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 			DeviceType:   "shared",
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,
+				MountConfig: map[string]interface{}{
+					"id": csiVolumeId,
+					"attributes": csiVolumeAttributes,
+				},
 			},
 		}},
 	}
@@ -402,4 +413,25 @@ func readOnlyToMode(ro bool) string {
 		return "r"
 	}
 	return "rw"
+}
+
+func getFingerprint(rawObject interface{}) (*ServiceFingerPrint, error) {
+	fingerprint, ok := rawObject.(*ServiceFingerPrint)
+	if ok {
+		return fingerprint, nil
+	}
+
+	// casting didn't work--try marshalling and unmarshalling as the correct type
+	rawJson, err := json.Marshal(rawObject)
+	if err != nil {
+		return nil, err
+	}
+
+	fingerprint = &ServiceFingerPrint{}
+	err = json.Unmarshal(rawJson, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+
+	return fingerprint, nil
 }
