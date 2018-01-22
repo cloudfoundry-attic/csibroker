@@ -163,7 +163,7 @@ var _ = Describe("Broker", func() {
 			Context("if the controller has not been probed yet", func() {
 				It("probes the controller", func() {
 					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
-					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major: 0, Minor: 0, Patch: 1}}))
 					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
 				})
 
@@ -228,8 +228,8 @@ var _ = Describe("Broker", func() {
 				BeforeEach(func() {
 					volInfo = &csi.VolumeInfo{
 						CapacityBytes: uint64(20),
-						Id: "some-volume-id",
-						}
+						Id:            "some-volume-id",
+					}
 					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{VolumeInfo: volInfo}, nil)
 				})
 
@@ -371,34 +371,14 @@ var _ = Describe("Broker", func() {
 				_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
 			})
 
-			Context("if the controller has not been probed yet", func() {
-				It("probes the controller", func() {
-					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
-					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
-					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+			Context("when the probe fails", func() {
+				BeforeEach(func() {
+					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
 				})
 
-				Context("if the probe fails", func() {
-					BeforeEach(func() {
-						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
-					})
-
-					It("should error", func() {
-						Expect(err).To(HaveOccurred())
-						Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
-					})
-				})
-			})
-
-			Context("if the controller has been probed already", func() {
-				JustBeforeEach(func() {
-					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
-					fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
-				})
-
-				It("does not probe the controller again for any future calls", func() {
-					_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
-					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				It("should error", func() {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(Equal("rpc error: code = Unknown desc = probe badness"))
 				})
 			})
 
@@ -422,7 +402,7 @@ var _ = Describe("Broker", func() {
 					asyncAllowed = false
 
 					fingerprint := csibroker.ServiceFingerPrint{
-						Name: "some-csi-storage",
+						Name:       "some-csi-storage",
 						VolumeInfo: &csi.VolumeInfo{Id: "some-volume-id"},
 					}
 
@@ -440,6 +420,24 @@ var _ = Describe("Broker", func() {
 					previousSaveCallCount = fakeStore.SaveCallCount()
 				})
 
+				Context("if the controller has been probed already", func() {
+					JustBeforeEach(func() {
+						Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, nil)
+					})
+
+					It("does not probe the controller again for any future calls", func() {
+						_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
+						Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+					})
+				})
+
+				It("probes the controller", func() {
+					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major: 0, Minor: 0, Patch: 1}}))
+					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
+				})
+
 				It("should succeed", func() {
 					Expect(err).NotTo(HaveOccurred())
 				})
@@ -450,8 +448,8 @@ var _ = Describe("Broker", func() {
 
 				It("should send the request to the controller client", func() {
 					expectedRequest := &csi.DeleteVolumeRequest{
-						Version: csibroker.CSIversion,
-						VolumeId:       "some-volume-id",
+						Version:         csibroker.CSIversion,
+						VolumeId:        "some-volume-id",
 						UserCredentials: map[string]string{},
 					}
 					Expect(fakeController.DeleteVolumeCallCount()).To(Equal(1))
@@ -550,8 +548,8 @@ var _ = Describe("Broker", func() {
 				fingerprint := csibroker.ServiceFingerPrint{
 					Name: "some-csi-storage",
 					VolumeInfo: &csi.VolumeInfo{
-						Id: instanceID,
-						Attributes: map[string]string{"foo":"bar"},
+						Id:         instanceID,
+						Attributes: map[string]string{"foo": "bar"},
 					},
 				}
 
@@ -578,7 +576,7 @@ var _ = Describe("Broker", func() {
 				It("probes the controller", func() {
 					broker.Bind(ctx, instanceID, "binding-id", bindDetails)
 					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
-					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major: 0, Minor: 0, Patch: 1}}))
 					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
 				})
 
@@ -772,7 +770,7 @@ var _ = Describe("Broker", func() {
 				It("probes the controller", func() {
 					broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
 					_, request, _ := fakeController.ControllerProbeArgsForCall(0)
-					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major:0, Minor: 0, Patch:1}}))
+					Expect(request).To(Equal(&csi.ControllerProbeRequest{&csi.Version{Major: 0, Minor: 0, Patch: 1}}))
 					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
 				})
 
