@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"code.cloudfoundry.org/csibroker/csibroker"
+	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/csishim/csi_fake"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
@@ -25,18 +26,19 @@ import (
 
 var _ = Describe("Broker", func() {
 	var (
-		broker         *csibroker.Broker
-		fakeOs         *os_fake.FakeOs
-		specFilepath   string
-		pwd            string
-		logger         lager.Logger
-		ctx            context.Context
-		fakeStore      *brokerstorefakes.FakeStore
-		fakeCsi        *csi_fake.FakeCsi
-		conn           *grpc.ClientConn
-		fakeController *csi_fake.FakeControllerClient
-		err            error
-		driverName     string
+		broker                 *csibroker.Broker
+		fakeOs                 *os_fake.FakeOs
+		specFilepath           string
+		pwd                    string
+		logger                 lager.Logger
+		ctx                    context.Context
+		fakeStore              *brokerstorefakes.FakeStore
+		fakeCsi                *csi_fake.FakeCsi
+		conn                   *grpc.ClientConn
+		fakeController         *csi_fake.FakeControllerClient
+		fakeIdentityController *csi_fake.FakeIdentityClient
+		err                    error
+		driverName             string
 	)
 
 	BeforeEach(func() {
@@ -46,11 +48,18 @@ var _ = Describe("Broker", func() {
 		fakeStore = &brokerstorefakes.FakeStore{}
 		fakeCsi = &csi_fake.FakeCsi{}
 		fakeController = &csi_fake.FakeControllerClient{}
+		fakeIdentityController = &csi_fake.FakeIdentityClient{}
 
 		fakeCsi.NewControllerClientReturns(fakeController)
+		fakeCsi.NewIdentityClientReturns(fakeIdentityController)
+
 		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 		conn, err = grpc.Dial(listenAddr, grpc.WithInsecure())
 		driverName = "some-csi-driver"
+
+		fakeIdentityController.GetSupportedVersionsReturns(&csi.GetSupportedVersionsResponse{
+			[]*csi.Version{&csishim.CsiVersion},
+		}, nil)
 	})
 
 	Context("when creating first time", func() {
@@ -167,6 +176,19 @@ var _ = Describe("Broker", func() {
 					Expect(fakeController.ControllerProbeCallCount()).To(Equal(1))
 				})
 
+				Context("when the version is not compatible", func() {
+					BeforeEach(func() {
+						fakeIdentityController.GetSupportedVersionsReturns(&csi.GetSupportedVersionsResponse{
+							[]*csi.Version{{Major: 9, Minor: 9, Patch: 9}},
+						}, nil)
+					})
+
+					It("fails", func() {
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(ContainSubstring("incompatible versions"))
+					})
+
+				})
 				Context("if the probe fails", func() {
 					BeforeEach(func() {
 						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))

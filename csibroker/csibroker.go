@@ -12,6 +12,7 @@ import (
 
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/csishim"
+	"code.cloudfoundry.org/goshims/grpcshim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
@@ -51,6 +52,7 @@ type Broker struct {
 	service          *brokerapi.Service
 	store            brokerstore.Store
 	csi              csishim.Csi
+	identityClient   csi.IdentityClient
 	controllerClient csi.ControllerClient
 	driverName       string
 	controllerProbed bool
@@ -93,6 +95,7 @@ func New(
 		return nil, err
 	}
 	newController := csishim.NewControllerClient(conn)
+	newIdentityController := csishim.NewIdentityClient(&grpcshim.ClientConnShim{ClientConn: conn})
 
 	theBroker := Broker{
 		logger:           logger,
@@ -102,6 +105,7 @@ func New(
 		store:            store,
 		csi:              csishim,
 		controllerClient: newController,
+		identityClient:   newIdentityController,
 		service:          brokerService,
 		driverName:       driverName,
 		controllerProbed: false,
@@ -319,7 +323,7 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,
 				MountConfig: map[string]interface{}{
-					"id": csiVolumeId,
+					"id":         csiVolumeId,
 					"attributes": csiVolumeAttributes,
 				},
 			},
@@ -377,12 +381,30 @@ func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetail
 }
 
 func (b *Broker) probeController() error {
-	if (!b.controllerProbed) {
-		_, err := b.controllerClient.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
+	if !b.controllerProbed {
+		supportedVersions, err := b.identityClient.GetSupportedVersions(context.TODO(), &csi.GetSupportedVersionsRequest{})
 		if err != nil {
 			return err
 		}
-		b.controllerProbed = true
+
+		var compatible bool
+		for _, version := range supportedVersions.SupportedVersions {
+			if version.Major == csishim.CsiVersion.Major &&
+				version.Minor == csishim.CsiVersion.Minor &&
+				version.Patch == csishim.CsiVersion.Patch {
+				compatible = true
+			}
+		}
+
+		if compatible {
+			_, err = b.controllerClient.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
+			if err != nil {
+				return err
+			}
+			b.controllerProbed = true
+		} else {
+			return errors.New("incompatible versions")
+		}
 	}
 	return nil
 }
