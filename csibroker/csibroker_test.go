@@ -187,8 +187,19 @@ var _ = Describe("Broker", func() {
 						Expect(err).To(HaveOccurred())
 						Expect(err.Error()).To(ContainSubstring("incompatible versions"))
 					})
-
 				})
+
+				Context("when the version check fails", func() {
+					BeforeEach(func() {
+						fakeIdentityController.GetSupportedVersionsReturns(&csi.GetSupportedVersionsResponse{}, errors.New("versions badness"))
+					})
+
+					It("fails", func() {
+						Expect(err).To(HaveOccurred())
+						Expect(err.Error()).To(ContainSubstring("versions badness"))
+					})
+				})
+
 				Context("if the probe fails", func() {
 					BeforeEach(func() {
 						fakeController.ControllerProbeReturns(&csi.ControllerProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
