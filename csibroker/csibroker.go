@@ -16,7 +16,7 @@ import (
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
-	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
 
@@ -28,15 +28,9 @@ const (
 	DefaultContainerPath  = "/var/vcap/data"
 )
 
-var CSIversion = &csi.Version{
-	Major: 0,
-	Minor: 0,
-	Patch: 1,
-}
-
 type ServiceFingerPrint struct {
-	Name       string
-	VolumeInfo *csi.VolumeInfo
+	Name   string
+	Volume *csi.Volume
 }
 
 type lock interface {
@@ -139,7 +133,6 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		logger.Error("provision-raw-parameters-decode-error", err)
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
 	}
-	configuration.Version = CSIversion
 	if configuration.Name == "" {
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires a \"name\"")
 	}
@@ -153,7 +146,7 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
 
-	volInfo := response.GetVolumeInfo()
+	volInfo := response.GetVolume()
 
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -198,7 +191,6 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 	defer logger.Info("end")
 
 	var configuration csi.DeleteVolumeRequest
-	configuration.Version = CSIversion
 
 	if instanceID == "" {
 		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires instance ID")
@@ -215,7 +207,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
 	}
 
-	configuration.UserCredentials = map[string]string{}
+	configuration.ControllerDeleteSecrets = map[string]string{}
 
 	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
 
@@ -223,7 +215,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 
-	configuration.VolumeId = fingerprint.VolumeInfo.Id
+	configuration.VolumeId = fingerprint.Volume.Id
 
 	_, err = b.controllerClient.DeleteVolume(context, &configuration)
 	if err != nil {
@@ -281,8 +273,8 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, err
 	}
 
-	csiVolumeId := fingerprint.VolumeInfo.Id
-	csiVolumeAttributes := fingerprint.VolumeInfo.Attributes
+	csiVolumeId := fingerprint.Volume.Id
+	csiVolumeAttributes := fingerprint.Volume.Attributes
 
 	params := make(map[string]interface{})
 
@@ -382,29 +374,11 @@ func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetail
 
 func (b *Broker) probeController() error {
 	if !b.controllerProbed {
-		supportedVersions, err := b.identityClient.GetSupportedVersions(context.TODO(), &csi.GetSupportedVersionsRequest{})
+		_, err := b.identityClient.Probe(context.TODO(), &csi.ProbeRequest{})
 		if err != nil {
 			return err
 		}
-
-		var compatible bool
-		for _, version := range supportedVersions.SupportedVersions {
-			if version.Major == csishim.CsiVersion.Major &&
-				version.Minor == csishim.CsiVersion.Minor &&
-				version.Patch == csishim.CsiVersion.Patch {
-				compatible = true
-			}
-		}
-
-		if compatible {
-			_, err = b.controllerClient.ControllerProbe(context.TODO(), &csi.ControllerProbeRequest{Version: CSIversion})
-			if err != nil {
-				return err
-			}
-			b.controllerProbed = true
-		} else {
-			return errors.New("incompatible versions")
-		}
+		b.controllerProbed = true
 	}
 	return nil
 }
