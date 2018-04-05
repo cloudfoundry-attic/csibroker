@@ -125,7 +125,6 @@ var _ = Describe("csibroker Main", func() {
 		pwd          string
 		err          error
 		specFilepath string
-		driverName   string
 	)
 	BeforeEach(func() {
 		tempDir = os.TempDir()
@@ -133,7 +132,6 @@ var _ = Describe("csibroker Main", func() {
 		Expect(err).ToNot(HaveOccurred())
 		csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
 		specFilepath = filepath.Join(pwd, "fixtures", "service_spec.json")
-		driverName = "some-csi-driver"
 	})
 
 	Context("Parse VCAP_SERVICES tests", func() {
@@ -247,20 +245,6 @@ var _ = Describe("csibroker Main", func() {
 
 		})
 
-		It("shows usage to include driverName", func() {
-			var args []string
-			args = append(args, "-dataDir", tempDir)
-			args = append(args, "-csiConAddr", csiConAddr)
-			args = append(args, "-serviceSpec", specFilepath)
-			volmanRunner := failRunner{
-				Name:       "csibroker",
-				Command:    exec.Command(binaryPath, args...),
-				StartCheck: "driverName must be provided.",
-			}
-			process = ifrit.Invoke(volmanRunner)
-
-		})
-
 		AfterEach(func() {
 			ginkgomon.Kill(process) // this is only if incorrect implementation leaves process running
 		})
@@ -289,7 +273,6 @@ var _ = Describe("csibroker Main", func() {
 			args = append(args, "-password", password)
 			args = append(args, "-csiConAddr", csiConAddr)
 			args = append(args, "-serviceSpec", specFilepath)
-			args = append(args, "-driverName", driverName)
 		})
 
 		JustBeforeEach(func() {
@@ -337,11 +320,11 @@ var _ = Describe("csibroker Main", func() {
 				err = json.Unmarshal(bytes, &catalog)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(catalog.Services[0].Name).To(Equal("Service.Name"))
-				Expect(catalog.Services[0].ID).To(Equal("Service.ID"))
-				Expect(catalog.Services[0].Plans[0].ID).To(Equal("Service.Plans.ID"))
-				Expect(catalog.Services[0].Plans[0].Name).To(Equal("Service.Plans.Name"))
-				Expect(catalog.Services[0].Plans[0].Description).To(Equal("Service.Plans.Description"))
+				Expect(catalog.Services[0].Name).To(Equal("ServiceOne.Name"))
+				Expect(catalog.Services[0].ID).To(Equal("ServiceOne.ID"))
+				Expect(catalog.Services[0].Plans[0].ID).To(Equal("ServiceOne.Plans.ID"))
+				Expect(catalog.Services[0].Plans[0].Name).To(Equal("ServiceOne.Plans.Name"))
+				Expect(catalog.Services[0].Plans[0].Description).To(Equal("ServiceOne.Plans.Description"))
 			})
 		})
 	})

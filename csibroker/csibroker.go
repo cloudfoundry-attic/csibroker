@@ -51,6 +51,12 @@ type ServiceFingerPrint struct {
 	Volume *csi.Volume
 }
 
+type Service struct {
+	DriverName string `json:"driver_name"`
+
+	brokerapi.Service
+}
+
 type lock interface {
 	Lock()
 	Unlock()
@@ -61,12 +67,11 @@ type Broker struct {
 	os               osshim.Os
 	mutex            lock
 	clock            clock.Clock
-	services         []brokerapi.Service
+	services         []Service
 	store            brokerstore.Store
 	csi              csishim.Csi
 	identityClient   csi.IdentityClient
 	controllerClient csi.ControllerClient
-	driverName       string
 	controllerProbed bool
 }
 
@@ -78,7 +83,6 @@ func New(
 	store brokerstore.Store,
 	csishim csishim.Csi,
 	conn *grpc.ClientConn,
-	driverName string,
 ) (*Broker, error) {
 
 	logger = logger.Session("new-csi-broker")
@@ -92,7 +96,7 @@ func New(
 		return nil, err
 	}
 
-	var brokerServices []brokerapi.Service
+	var brokerServices []Service
 
 	err = json.Unmarshal(serviceSpec, &brokerServices)
 	if err != nil {
@@ -126,7 +130,6 @@ func New(
 		controllerClient: newController,
 		identityClient:   newIdentityController,
 		services:         brokerServices,
-		driverName:       driverName,
 		controllerProbed: false,
 	}
 
@@ -138,7 +141,12 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 	logger.Info("start")
 	defer logger.Info("end")
 
-	return b.services
+	var brokerServices []brokerapi.Service
+	for _, s := range b.services {
+		brokerServices = append(brokerServices, s.Service)
+	}
+
+	return brokerServices
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
@@ -330,12 +338,19 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 
 	volumeId := fmt.Sprintf("%s-volume", instanceID)
 
+	var driverName string
+	for _, brokerService := range b.services {
+		if brokerService.ID == bindDetails.ServiceID {
+			driverName = brokerService.DriverName
+		}
+	}
+
 	ret := brokerapi.Binding{
 		Credentials: struct{}{}, // if nil, cloud controller chokes on response
 		VolumeMounts: []brokerapi.VolumeMount{{
 			ContainerDir: evaluateContainerPath(params, instanceID),
 			Mode:         mode,
-			Driver:       b.driverName,
+			Driver:       driverName,
 			DeviceType:   "shared",
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,

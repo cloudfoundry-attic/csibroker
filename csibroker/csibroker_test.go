@@ -37,7 +37,6 @@ var _ = Describe("Broker", func() {
 		fakeController         *csi_fake.FakeControllerClient
 		fakeIdentityController *csi_fake.FakeIdentityClient
 		err                    error
-		driverName             string
 	)
 
 	BeforeEach(func() {
@@ -54,8 +53,6 @@ var _ = Describe("Broker", func() {
 
 		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 		conn, err = grpc.Dial(listenAddr, grpc.WithInsecure())
-		driverName = "some-csi-driver"
-
 	})
 
 	Context("when creating first time", func() {
@@ -74,7 +71,6 @@ var _ = Describe("Broker", func() {
 				fakeStore,
 				fakeCsi,
 				conn,
-				driverName,
 			)
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -122,7 +118,6 @@ var _ = Describe("Broker", func() {
 						fakeStore,
 						fakeCsi,
 						conn,
-						driverName,
 					)
 				})
 
@@ -142,7 +137,6 @@ var _ = Describe("Broker", func() {
 						fakeStore,
 						fakeCsi,
 						conn,
-						driverName,
 					)
 				})
 
@@ -162,7 +156,6 @@ var _ = Describe("Broker", func() {
 						fakeStore,
 						fakeCsi,
 						conn,
-						driverName,
 					)
 				})
 
@@ -592,7 +585,7 @@ var _ = Describe("Broker", func() {
 
 			BeforeEach(func() {
 				instanceID = "some-instance-id"
-				serviceID = "some-service-id"
+				serviceID = "ServiceOne.ID"
 				params = make(map[string]interface{})
 				params["key"] = "value"
 				rawParameters, err = json.Marshal(params)
@@ -719,7 +712,7 @@ var _ = Describe("Broker", func() {
 				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(binding.VolumeMounts[0].Driver).To(Equal(driverName))
+				Expect(binding.VolumeMounts[0].Driver).To(Equal("some-driver-one"))
 			})
 
 			It("fills in the volume id", func() {

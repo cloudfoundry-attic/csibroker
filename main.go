@@ -62,12 +62,6 @@ var csiConAddr = flag.String(
 	"[REQUIRED] - address por CSI controller is listen to",
 )
 
-var driverName = flag.String(
-	"driverName",
-	"",
-	"[REQUIRED] - driver name of CSI plugin",
-)
-
 var dbDriver = flag.String(
 	"dbDriver",
 	"",
@@ -159,12 +153,6 @@ func checkParams() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	if *driverName == "" {
-		fmt.Fprint(os.Stderr, "\nERROR:driverName must be provided.\n\n")
-		flag.Usage()
-		os.Exit(1)
-	}
-
 }
 
 func parseVcapServices(logger lager.Logger, os osshim.Os) {
@@ -226,9 +214,15 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		os.Exit(1)
 	}
 
-	serviceBroker, err := csibroker.New(logger,
+	serviceBroker, err := csibroker.New(
+		logger,
 		*serviceSpec,
-		&osshim.OsShim{}, clock.NewClock(), store, &csishim.CsiShim{}, conn, *driverName)
+		&osshim.OsShim{},
+		clock.NewClock(),
+		store,
+		&csishim.CsiShim{},
+		conn,
+	)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
 
 	if err != nil {
