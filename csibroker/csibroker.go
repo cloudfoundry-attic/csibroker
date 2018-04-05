@@ -28,6 +28,24 @@ const (
 	DefaultContainerPath  = "/var/vcap/data"
 )
 
+var ErrEmptySpecFile = errors.New("At least one service must be provided in specfile")
+
+type ErrInvalidService struct {
+	Index int
+}
+
+func (e ErrInvalidService) Error() string {
+	return fmt.Sprintf("Invalid service in specfile at index %d", e.Index)
+}
+
+type ErrInvalidSpecFile struct {
+	err error
+}
+
+func (e ErrInvalidSpecFile) Error() string {
+	return fmt.Sprintf("Invalid specfile %s", e.err.Error())
+}
+
 type ServiceFingerPrint struct {
 	Name   string
 	Volume *csi.Volume
@@ -43,7 +61,7 @@ type Broker struct {
 	os               osshim.Os
 	mutex            lock
 	clock            clock.Clock
-	service          *brokerapi.Service
+	services         []brokerapi.Service
 	store            brokerstore.Store
 	csi              csishim.Csi
 	identityClient   csi.IdentityClient
@@ -74,19 +92,26 @@ func New(
 		return nil, err
 	}
 
-	brokerService := &brokerapi.Service{}
+	var brokerServices []brokerapi.Service
 
-	err = json.Unmarshal(serviceSpec, brokerService)
+	err = json.Unmarshal(serviceSpec, &brokerServices)
 	if err != nil {
 		logger.Error("failed-to-unmarshall-spec from spec-file", err, lager.Data{"fileName": serviceSpecPath})
-		return nil, err
+		return nil, ErrInvalidSpecFile{err}
 	}
 	logger.Info("spec-loaded", lager.Data{"fileName": serviceSpecPath})
 
-	if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
-		err = errors.New("Not a valid specfile")
-		logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "brokerService": brokerService})
-		return nil, err
+	if len(brokerServices) < 1 {
+		logger.Error("invalid-service-spec-file", ErrEmptySpecFile, lager.Data{"fileName": serviceSpecPath})
+		return nil, ErrEmptySpecFile
+	}
+
+	for i, brokerService := range brokerServices {
+		if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
+			err = ErrInvalidService{Index: i}
+			logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "index": i, "brokerService": brokerService})
+			return nil, err
+		}
 	}
 	newController := csishim.NewControllerClient(conn)
 	newIdentityController := csishim.NewIdentityClient(&grpcshim.ClientConnShim{ClientConn: conn})
@@ -100,7 +125,7 @@ func New(
 		csi:              csishim,
 		controllerClient: newController,
 		identityClient:   newIdentityController,
-		service:          brokerService,
+		services:         brokerServices,
 		driverName:       driverName,
 		controllerProbed: false,
 	}
@@ -113,7 +138,7 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 	logger.Info("start")
 	defer logger.Info("end")
 
-	return []brokerapi.Service{*b.service}
+	return b.services
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {

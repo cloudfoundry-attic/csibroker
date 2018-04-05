@@ -76,31 +76,44 @@ var _ = Describe("Broker", func() {
 				conn,
 				driverName,
 			)
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		Context(".Services", func() {
 			Context("when the specfile is valid", func() {
 				It("returns the service catalog as appropriate", func() {
-					result := broker.Services(ctx)[0]
+					services := broker.Services(ctx)
+					Expect(services).To(HaveLen(2))
 
-					Expect(result.ID).To(Equal("Service.ID"))
-					Expect(result.Name).To(Equal("Service.Name"))
-					Expect(result.Description).To(Equal("Service.Description"))
-					Expect(result.Bindable).To(Equal(true))
-					Expect(result.PlanUpdatable).To(Equal(false))
-					Expect(result.Tags).To(ContainElement("Service.Tag1"))
-					Expect(result.Tags).To(ContainElement("Service.Tag2"))
-					Expect(result.Requires).To(ContainElement(brokerapi.RequiredPermission("Service.Requires")))
+					Expect(services[0].ID).To(Equal("ServiceOne.ID"))
+					Expect(services[0].Name).To(Equal("ServiceOne.Name"))
+					Expect(services[0].Description).To(Equal("ServiceOne.Description"))
+					Expect(services[0].Bindable).To(Equal(true))
+					Expect(services[0].PlanUpdatable).To(Equal(false))
+					Expect(services[0].Tags).To(ContainElement("ServiceOne.Tag1"))
+					Expect(services[0].Tags).To(ContainElement("ServiceOne.Tag2"))
+					Expect(services[0].Requires).To(ContainElement(brokerapi.RequiredPermission("ServiceOne.Requires")))
+					Expect(services[0].Plans[0].Name).To(Equal("ServiceOne.Plans.Name"))
+					Expect(services[0].Plans[0].ID).To(Equal("ServiceOne.Plans.ID"))
+					Expect(services[0].Plans[0].Description).To(Equal("ServiceOne.Plans.Description"))
 
-					Expect(result.Plans[0].Name).To(Equal("Service.Plans.Name"))
-					Expect(result.Plans[0].ID).To(Equal("Service.Plans.ID"))
-					Expect(result.Plans[0].Description).To(Equal("Service.Plans.Description"))
+					Expect(services[1].ID).To(Equal("ServiceTwo.ID"))
+					Expect(services[1].Name).To(Equal("ServiceTwo.Name"))
+					Expect(services[1].Description).To(Equal("ServiceTwo.Description"))
+					Expect(services[1].Bindable).To(Equal(false))
+					Expect(services[1].PlanUpdatable).To(Equal(true))
+					Expect(services[1].Tags).To(ContainElement("ServiceTwo.Tag1"))
+					Expect(services[1].Tags).To(ContainElement("ServiceTwo.Tag2"))
+					Expect(services[1].Requires).To(ContainElement(brokerapi.RequiredPermission("ServiceTwo.Requires")))
+					Expect(services[1].Plans[0].Name).To(Equal("ServiceTwo.Plans.Name"))
+					Expect(services[1].Plans[0].ID).To(Equal("ServiceTwo.Plans.ID"))
+					Expect(services[1].Plans[0].Description).To(Equal("ServiceTwo.Plans.Description"))
 				})
 			})
 
-			Context("when the specfile is not valid", func() {
+			Context("when the specfile is invalid", func() {
 				BeforeEach(func() {
-					specFilepath = filepath.Join(pwd, "..", "fixtures", "broken_service_spec.json")
+					specFilepath = filepath.Join(pwd, "..", "fixtures", "invalid_spec.json")
 					broker, err = csibroker.New(
 						logger,
 						specFilepath,
@@ -114,10 +127,49 @@ var _ = Describe("Broker", func() {
 				})
 
 				It("returns an error", func() {
-					Expect(err).To(Equal(errors.New("Not a valid specfile")))
+					Expect(err).To(BeAssignableToTypeOf(csibroker.ErrInvalidSpecFile{}))
 				})
 			})
 
+			Context("when the specfile has no services", func() {
+				BeforeEach(func() {
+					specFilepath = filepath.Join(pwd, "..", "fixtures", "empty_spec.json")
+					broker, err = csibroker.New(
+						logger,
+						specFilepath,
+						fakeOs,
+						nil,
+						fakeStore,
+						fakeCsi,
+						conn,
+						driverName,
+					)
+				})
+
+				It("returns an error", func() {
+					Expect(err).To(Equal(csibroker.ErrEmptySpecFile))
+				})
+			})
+
+			Context("when the specfile has invalid service", func() {
+				BeforeEach(func() {
+					specFilepath = filepath.Join(pwd, "..", "fixtures", "invalid_service_spec.json")
+					broker, err = csibroker.New(
+						logger,
+						specFilepath,
+						fakeOs,
+						nil,
+						fakeStore,
+						fakeCsi,
+						conn,
+						driverName,
+					)
+				})
+
+				It("returns an error", func() {
+					Expect(err).To(Equal(csibroker.ErrInvalidService{Index: 0}))
+				})
+			})
 		})
 
 		Context(".Provision", func() {
