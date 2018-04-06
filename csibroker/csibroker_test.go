@@ -10,6 +10,7 @@ import (
 
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csishim/csi_fake"
+	"code.cloudfoundry.org/goshims/grpcshim/grpc_fake"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
@@ -33,6 +34,7 @@ var _ = Describe("Broker", func() {
 		ctx                    context.Context
 		fakeStore              *brokerstorefakes.FakeStore
 		fakeCsi                *csi_fake.FakeCsi
+		fakeGrpc               *grpc_fake.FakeGrpc
 		conn                   *grpc.ClientConn
 		fakeController         *csi_fake.FakeControllerClient
 		fakeIdentityController *csi_fake.FakeIdentityClient
@@ -45,6 +47,7 @@ var _ = Describe("Broker", func() {
 		fakeOs = &os_fake.FakeOs{}
 		fakeStore = &brokerstorefakes.FakeStore{}
 		fakeCsi = &csi_fake.FakeCsi{}
+		fakeGrpc = &grpc_fake.FakeGrpc{}
 		fakeController = &csi_fake.FakeControllerClient{}
 		fakeIdentityController = &csi_fake.FakeIdentityClient{}
 
@@ -65,104 +68,15 @@ var _ = Describe("Broker", func() {
 
 			broker, err = csibroker.New(
 				logger,
-				specFilepath,
 				fakeOs,
 				nil,
 				fakeStore,
-				fakeCsi,
-				conn,
+				new(csibroker.ServicesRegistry),
 			)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		Context(".Services", func() {
-			Context("when the specfile is valid", func() {
-				It("returns the service catalog as appropriate", func() {
-					services := broker.Services(ctx)
-					Expect(services).To(HaveLen(2))
-
-					Expect(services[0].ID).To(Equal("ServiceOne.ID"))
-					Expect(services[0].Name).To(Equal("ServiceOne.Name"))
-					Expect(services[0].Description).To(Equal("ServiceOne.Description"))
-					Expect(services[0].Bindable).To(Equal(true))
-					Expect(services[0].PlanUpdatable).To(Equal(false))
-					Expect(services[0].Tags).To(ContainElement("ServiceOne.Tag1"))
-					Expect(services[0].Tags).To(ContainElement("ServiceOne.Tag2"))
-					Expect(services[0].Requires).To(ContainElement(brokerapi.RequiredPermission("ServiceOne.Requires")))
-					Expect(services[0].Plans[0].Name).To(Equal("ServiceOne.Plans.Name"))
-					Expect(services[0].Plans[0].ID).To(Equal("ServiceOne.Plans.ID"))
-					Expect(services[0].Plans[0].Description).To(Equal("ServiceOne.Plans.Description"))
-
-					Expect(services[1].ID).To(Equal("ServiceTwo.ID"))
-					Expect(services[1].Name).To(Equal("ServiceTwo.Name"))
-					Expect(services[1].Description).To(Equal("ServiceTwo.Description"))
-					Expect(services[1].Bindable).To(Equal(false))
-					Expect(services[1].PlanUpdatable).To(Equal(true))
-					Expect(services[1].Tags).To(ContainElement("ServiceTwo.Tag1"))
-					Expect(services[1].Tags).To(ContainElement("ServiceTwo.Tag2"))
-					Expect(services[1].Requires).To(ContainElement(brokerapi.RequiredPermission("ServiceTwo.Requires")))
-					Expect(services[1].Plans[0].Name).To(Equal("ServiceTwo.Plans.Name"))
-					Expect(services[1].Plans[0].ID).To(Equal("ServiceTwo.Plans.ID"))
-					Expect(services[1].Plans[0].Description).To(Equal("ServiceTwo.Plans.Description"))
-				})
-			})
-
-			Context("when the specfile is invalid", func() {
-				BeforeEach(func() {
-					specFilepath = filepath.Join(pwd, "..", "fixtures", "invalid_spec.json")
-					broker, err = csibroker.New(
-						logger,
-						specFilepath,
-						fakeOs,
-						nil,
-						fakeStore,
-						fakeCsi,
-						conn,
-					)
-				})
-
-				It("returns an error", func() {
-					Expect(err).To(BeAssignableToTypeOf(csibroker.ErrInvalidSpecFile{}))
-				})
-			})
-
-			Context("when the specfile has no services", func() {
-				BeforeEach(func() {
-					specFilepath = filepath.Join(pwd, "..", "fixtures", "empty_spec.json")
-					broker, err = csibroker.New(
-						logger,
-						specFilepath,
-						fakeOs,
-						nil,
-						fakeStore,
-						fakeCsi,
-						conn,
-					)
-				})
-
-				It("returns an error", func() {
-					Expect(err).To(Equal(csibroker.ErrEmptySpecFile))
-				})
-			})
-
-			Context("when the specfile has invalid service", func() {
-				BeforeEach(func() {
-					specFilepath = filepath.Join(pwd, "..", "fixtures", "invalid_service_spec.json")
-					broker, err = csibroker.New(
-						logger,
-						specFilepath,
-						fakeOs,
-						nil,
-						fakeStore,
-						fakeCsi,
-						conn,
-					)
-				})
-
-				It("returns an error", func() {
-					Expect(err).To(Equal(csibroker.ErrInvalidService{Index: 0}))
-				})
-			})
 		})
 
 		Context(".Provision", func() {

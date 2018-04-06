@@ -1,7 +1,8 @@
 [
   {
     "id":"ServiceOne.ID",
-		"driver_name": "some-driver-one",
+    "driver_name": "some-driver-one",
+    "connection_address": "0.0.0.0:1000",
     "name":"ServiceOne.Name",
     "description":"ServiceOne.Description",
     "bindable":true,
@@ -44,7 +45,7 @@
   },
   {
     "id":"ServiceTwo.ID",
-		"driver_name": "some-driver-two",
+    "driver_name": "some-driver-two",
     "name":"ServiceTwo.Name",
     "description":"ServiceTwo.Description",
     "bindable":false,

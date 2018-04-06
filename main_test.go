@@ -126,6 +126,7 @@ var _ = Describe("csibroker Main", func() {
 		err          error
 		specFilepath string
 	)
+
 	BeforeEach(func() {
 		tempDir = os.TempDir()
 		pwd, err = os.Getwd()
@@ -146,6 +147,7 @@ var _ = Describe("csibroker Main", func() {
 			*cfServiceName = "postgresql"
 			logger = lagertest.NewTestLogger("test-broker-main")
 		})
+
 		JustBeforeEach(func() {
 			env := fmt.Sprintf(`
 				{
@@ -255,7 +257,6 @@ var _ = Describe("csibroker Main", func() {
 		var (
 			args               []string
 			listenAddr         string
-			csiConAddr         string
 			username, password string
 
 			process ifrit.Process
@@ -265,13 +266,11 @@ var _ = Describe("csibroker Main", func() {
 			listenAddr = "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
 			username = "admin"
 			password = "password"
-			csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
 
 			args = append(args, "-listenAddr", listenAddr)
 			args = append(args, "-dataDir", tempDir)
 			args = append(args, "-username", username)
 			args = append(args, "-password", password)
-			args = append(args, "-csiConAddr", csiConAddr)
 			args = append(args, "-serviceSpec", specFilepath)
 		})
 

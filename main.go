@@ -23,7 +23,6 @@ import (
 	"github.com/tedsuo/ifrit"
 	"github.com/tedsuo/ifrit/grouper"
 	"github.com/tedsuo/ifrit/http_server"
-	"google.golang.org/grpc"
 )
 
 var dataDir = flag.String(
@@ -54,12 +53,6 @@ var serviceSpec = flag.String(
 	"serviceSpec",
 	"",
 	"[REQUIRED] - the file path of the specfile which defines the service",
-)
-
-var csiConAddr = flag.String(
-	"csiConAddr",
-	"",
-	"[REQUIRED] - address por CSI controller is listen to",
 )
 
 var dbDriver = flag.String(
@@ -143,11 +136,6 @@ func checkParams() {
 		os.Exit(1)
 	}
 
-	if *csiConAddr == "" {
-		fmt.Fprint(os.Stderr, "\nERROR:csiConAddr must be provided.\n\n")
-		flag.Usage()
-		os.Exit(1)
-	}
 	if *serviceSpec == "" {
 		fmt.Fprint(os.Stderr, "\nERROR:serviceSpec must be provided.\n\n")
 		flag.Usage()
@@ -199,20 +187,12 @@ func parseEnvironment() {
 func createServer(logger lager.Logger) ifrit.Runner {
 	fileName := filepath.Join(*dataDir, "csi-general-services.json")
 
-	logger.Debug("csiConAddress: " + *csiConAddr)
-
 	// if we are CF pushed
 	if *cfServiceName != "" {
 		parseVcapServices(logger, &osshim.OsShim{})
 	}
 
 	store := brokerstore.NewStore(logger, *dbDriver, dbUsername, dbPassword, *dbHostname, *dbPort, *dbName, *dbCACert, fileName)
-	conn, err := grpc.Dial(*csiConAddr, grpc.WithInsecure())
-
-	if err != nil {
-		logger.Error("cannot-reach-csi-plugin", err)
-		os.Exit(1)
-	}
 
 	serviceBroker, err := csibroker.New(
 		logger,
@@ -221,7 +201,6 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		clock.NewClock(),
 		store,
 		&csishim.CsiShim{},
-		conn,
 	)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
 

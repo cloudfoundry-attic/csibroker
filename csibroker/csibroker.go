@@ -5,22 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"sync"
 
 	"path"
 
 	"code.cloudfoundry.org/clock"
-	"code.cloudfoundry.org/csishim"
-	"code.cloudfoundry.org/goshims/grpcshim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
-
-	"google.golang.org/grpc"
 )
 
 const (
@@ -53,6 +48,7 @@ type ServiceFingerPrint struct {
 
 type Service struct {
 	DriverName string `json:"driver_name"`
+	ConnAddr   string `json:"connection_address"`
 
 	brokerapi.Service
 }
@@ -67,58 +63,22 @@ type Broker struct {
 	os               osshim.Os
 	mutex            lock
 	clock            clock.Clock
-	services         []Service
+	servicesRegistry *ServicesRegistry
 	store            brokerstore.Store
-	csi              csishim.Csi
-	identityClient   csi.IdentityClient
-	controllerClient csi.ControllerClient
 	controllerProbed bool
 }
 
 func New(
 	logger lager.Logger,
-	serviceSpecPath string,
 	os osshim.Os,
 	clock clock.Clock,
 	store brokerstore.Store,
-	csishim csishim.Csi,
-	conn *grpc.ClientConn,
+	servicesRegistry *ServicesRegistry,
 ) (*Broker, error) {
 
 	logger = logger.Session("new-csi-broker")
 	logger.Info("start")
 	defer logger.Info("end")
-
-	serviceSpec, err := ioutil.ReadFile(serviceSpecPath)
-
-	if err != nil {
-		logger.Error("failed-to-read-service-spec", err, lager.Data{"fileName": serviceSpecPath})
-		return nil, err
-	}
-
-	var brokerServices []Service
-
-	err = json.Unmarshal(serviceSpec, &brokerServices)
-	if err != nil {
-		logger.Error("failed-to-unmarshall-spec from spec-file", err, lager.Data{"fileName": serviceSpecPath})
-		return nil, ErrInvalidSpecFile{err}
-	}
-	logger.Info("spec-loaded", lager.Data{"fileName": serviceSpecPath})
-
-	if len(brokerServices) < 1 {
-		logger.Error("invalid-service-spec-file", ErrEmptySpecFile, lager.Data{"fileName": serviceSpecPath})
-		return nil, ErrEmptySpecFile
-	}
-
-	for i, brokerService := range brokerServices {
-		if brokerService.ID == "" || brokerService.Name == "" || brokerService.Description == "" || brokerService.Plans == nil {
-			err = ErrInvalidService{Index: i}
-			logger.Error("invalid-service-spec-file", err, lager.Data{"fileName": serviceSpecPath, "index": i, "brokerService": brokerService})
-			return nil, err
-		}
-	}
-	newController := csishim.NewControllerClient(conn)
-	newIdentityController := csishim.NewIdentityClient(&grpcshim.ClientConnShim{ClientConn: conn})
 
 	theBroker := Broker{
 		logger:           logger,
@@ -126,10 +86,7 @@ func New(
 		mutex:            &sync.Mutex{},
 		clock:            clock,
 		store:            store,
-		csi:              csishim,
-		controllerClient: newController,
-		identityClient:   newIdentityController,
-		services:         brokerServices,
+		servicesRegistry: servicesRegistry,
 		controllerProbed: false,
 	}
 
@@ -141,16 +98,11 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 	logger.Info("start")
 	defer logger.Info("end")
 
-	var brokerServices []brokerapi.Service
-	for _, s := range b.services {
-		brokerServices = append(brokerServices, s.Service)
-	}
-
-	return brokerServices
+	return b.servicesRegistry.BrokerServices()
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
-	err := b.probeController()
+	err := b.probeController(details.ServiceID)
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
@@ -174,7 +126,11 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
 
-	response, err := b.controllerClient.CreateVolume(context, &configuration)
+	controllerClient, err := b.servicesRegistry.ControllerClient(details.ServiceID)
+	if err != nil {
+		return brokerapi.ProvisionedServiceSpec{}, err
+	}
+	response, err := controllerClient.CreateVolume(context, &configuration)
 	if err != nil {
 		return brokerapi.ProvisionedServiceSpec{}, err
 	}
@@ -215,7 +171,7 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 }
 
 func (b *Broker) Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (_ brokerapi.DeprovisionServiceSpec, e error) {
-	err := b.probeController()
+	err := b.probeController(details.ServiceID)
 	if err != nil {
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
@@ -250,7 +206,12 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 
 	configuration.VolumeId = fingerprint.Volume.Id
 
-	_, err = b.controllerClient.DeleteVolume(context, &configuration)
+	controllerClient, err := b.servicesRegistry.ControllerClient(details.ServiceID)
+	if err != nil {
+		return brokerapi.DeprovisionServiceSpec{}, err
+	}
+
+	_, err = controllerClient.DeleteVolume(context, &configuration)
 	if err != nil {
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
@@ -273,7 +234,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 }
 
 func (b *Broker) Bind(context context.Context, instanceID string, bindingID string, bindDetails brokerapi.BindDetails) (_ brokerapi.Binding, e error) {
-	err := b.probeController()
+	err := b.probeController(bindDetails.ServiceID)
 	if err != nil {
 		return brokerapi.Binding{}, err
 	}
@@ -338,11 +299,9 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 
 	volumeId := fmt.Sprintf("%s-volume", instanceID)
 
-	var driverName string
-	for _, brokerService := range b.services {
-		if brokerService.ID == bindDetails.ServiceID {
-			driverName = brokerService.DriverName
-		}
+	driverName, err := b.servicesRegistry.DriverName(bindDetails.ServiceID)
+	if err != nil {
+		return brokerapi.Binding{}, err
 	}
 
 	ret := brokerapi.Binding{
@@ -365,7 +324,7 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 }
 
 func (b *Broker) Unbind(context context.Context, instanceID string, bindingID string, details brokerapi.UnbindDetails) (e error) {
-	err := b.probeController()
+	err := b.probeController(details.ServiceID)
 	if err != nil {
 		return err
 	}
@@ -412,9 +371,13 @@ func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetail
 	return b.store.IsBindingConflict(bindingID, details)
 }
 
-func (b *Broker) probeController() error {
+func (b *Broker) probeController(serviceID string) error {
 	if !b.controllerProbed {
-		_, err := b.identityClient.Probe(context.TODO(), &csi.ProbeRequest{})
+		identityClient, err := b.servicesRegistry.IdentityClient(serviceID)
+		if err != nil {
+			return err
+		}
+		_, err = identityClient.Probe(context.TODO(), &csi.ProbeRequest{})
 		if err != nil {
 			return err
 		}
