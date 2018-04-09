@@ -27,6 +27,9 @@ var _ = Describe("ServicesRegistry", func() {
 
 	BeforeEach(func() {
 		fakeCsi = &csi_fake.FakeCsi{}
+		fakeCsi.NewIdentityClientReturns(&csi_fake.FakeIdentityClient{})
+		fakeCsi.NewControllerClientReturns(&csi_fake.FakeControllerClient{})
+
 		fakeGrpc = &grpc_fake.FakeGrpc{}
 		logger = lagertest.NewTestLogger("test-broker")
 
@@ -122,6 +125,22 @@ var _ = Describe("ServicesRegistry", func() {
 					Expect(connAddr).To(Equal("0.0.0.0:1000"))
 					Expect(fakeCsi.NewIdentityClientCallCount()).To(Equal(1))
 				})
+
+				Context("when called second time", func() {
+					It("returns the same identity client", func() {
+						client1, err := registry.IdentityClient("ServiceOne.ID")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(fakeGrpc.DialCallCount()).To(Equal(1))
+						Expect(fakeCsi.NewIdentityClientCallCount()).To(Equal(1))
+
+						client2, err := registry.IdentityClient("ServiceOne.ID")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(fakeGrpc.DialCallCount()).To(Equal(1))
+						Expect(fakeCsi.NewIdentityClientCallCount()).To(Equal(1))
+
+						Expect(client2).To(Equal(client1))
+					})
+				})
 			})
 
 			Context("when service does not have connection address", func() {
@@ -154,6 +173,22 @@ var _ = Describe("ServicesRegistry", func() {
 					connAddr, _ := fakeGrpc.DialArgsForCall(0)
 					Expect(connAddr).To(Equal("0.0.0.0:1000"))
 					Expect(fakeCsi.NewControllerClientCallCount()).To(Equal(1))
+				})
+
+				Context("when called second time", func() {
+					It("returns the same identity client", func() {
+						client1, err := registry.ControllerClient("ServiceOne.ID")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(fakeGrpc.DialCallCount()).To(Equal(1))
+						Expect(fakeCsi.NewControllerClientCallCount()).To(Equal(1))
+
+						client2, err := registry.ControllerClient("ServiceOne.ID")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(fakeGrpc.DialCallCount()).To(Equal(1))
+						Expect(fakeCsi.NewControllerClientCallCount()).To(Equal(1))
+
+						Expect(client2).To(Equal(client1))
+					})
 				})
 			})
 

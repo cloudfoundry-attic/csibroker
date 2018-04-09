@@ -82,6 +82,10 @@ func NewServicesRegistry(
 }
 
 func (r *servicesRegistry) IdentityClient(serviceID string) (csi.IdentityClient, error) {
+	if identityClient, ok := r.identityClients[serviceID]; ok {
+		return identityClient, nil
+	}
+
 	service, found := r.findServiceByID(serviceID)
 	if !found {
 		return nil, ErrServiceNotFound{ID: serviceID}
@@ -96,10 +100,17 @@ func (r *servicesRegistry) IdentityClient(serviceID string) (csi.IdentityClient,
 		return nil, err
 	}
 
-	return r.csiShim.NewIdentityClient(conn), nil
+	identityClient := r.csiShim.NewIdentityClient(conn)
+	r.identityClients[serviceID] = identityClient
+
+	return identityClient, nil
 }
 
 func (r *servicesRegistry) ControllerClient(serviceID string) (csi.ControllerClient, error) {
+	if controllerClient, ok := r.controllerClients[serviceID]; ok {
+		return controllerClient, nil
+	}
+
 	service, found := r.findServiceByID(serviceID)
 	if !found {
 		return nil, ErrServiceNotFound{ID: serviceID}
@@ -113,8 +124,10 @@ func (r *servicesRegistry) ControllerClient(serviceID string) (csi.ControllerCli
 	if err != nil {
 		return nil, err
 	}
+	controllerClient := r.csiShim.NewControllerClient(conn)
+	r.controllerClients[serviceID] = controllerClient
 
-	return r.csiShim.NewControllerClient(conn), nil
+	return controllerClient, nil
 }
 
 func (r *servicesRegistry) BrokerServices() []brokerapi.Service {
