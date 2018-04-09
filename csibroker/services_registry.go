@@ -21,7 +21,15 @@ func (e ErrServiceNotFound) Error() string {
 	return fmt.Sprintf("Service with ID %s not found", e.ID)
 }
 
-type ServicesRegistry struct {
+//go:generate counterfeiter -o csibroker_fake/fake_services_registry.go . ServicesRegistry
+type ServicesRegistry interface {
+	IdentityClient(serviceID string) (csi.IdentityClient, error)
+	ControllerClient(serviceID string) (csi.ControllerClient, error)
+	BrokerServices() []brokerapi.Service
+	DriverName(serviceID string) (string, error)
+}
+
+type servicesRegistry struct {
 	csiShim           csishim.Csi
 	grpcShim          grpcshim.Grpc
 	services          []Service
@@ -34,7 +42,7 @@ func NewServicesRegistry(
 	grpcShim grpcshim.Grpc,
 	serviceSpecPath string,
 	logger lager.Logger,
-) (*ServicesRegistry, error) {
+) (ServicesRegistry, error) {
 	serviceSpec, err := ioutil.ReadFile(serviceSpecPath)
 
 	if err != nil {
@@ -64,7 +72,7 @@ func NewServicesRegistry(
 		}
 	}
 
-	return &ServicesRegistry{
+	return &servicesRegistry{
 		csiShim:           csiShim,
 		grpcShim:          grpcShim,
 		services:          services,
@@ -73,7 +81,7 @@ func NewServicesRegistry(
 	}, nil
 }
 
-func (r *ServicesRegistry) IdentityClient(serviceID string) (csi.IdentityClient, error) {
+func (r *servicesRegistry) IdentityClient(serviceID string) (csi.IdentityClient, error) {
 	service, found := r.findServiceByID(serviceID)
 	if !found {
 		return nil, ErrServiceNotFound{ID: serviceID}
@@ -91,7 +99,7 @@ func (r *ServicesRegistry) IdentityClient(serviceID string) (csi.IdentityClient,
 	return r.csiShim.NewIdentityClient(conn), nil
 }
 
-func (r *ServicesRegistry) ControllerClient(serviceID string) (csi.ControllerClient, error) {
+func (r *servicesRegistry) ControllerClient(serviceID string) (csi.ControllerClient, error) {
 	service, found := r.findServiceByID(serviceID)
 	if !found {
 		return nil, ErrServiceNotFound{ID: serviceID}
@@ -109,7 +117,7 @@ func (r *ServicesRegistry) ControllerClient(serviceID string) (csi.ControllerCli
 	return r.csiShim.NewControllerClient(conn), nil
 }
 
-func (r *ServicesRegistry) BrokerServices() []brokerapi.Service {
+func (r *servicesRegistry) BrokerServices() []brokerapi.Service {
 	var brokerServices []brokerapi.Service
 	for _, s := range r.services {
 		brokerServices = append(brokerServices, s.Service)
@@ -118,7 +126,7 @@ func (r *ServicesRegistry) BrokerServices() []brokerapi.Service {
 	return brokerServices
 }
 
-func (r *ServicesRegistry) DriverName(serviceID string) (string, error) {
+func (r *servicesRegistry) DriverName(serviceID string) (string, error) {
 	service, found := r.findServiceByID(serviceID)
 	if !found {
 		return "", ErrServiceNotFound{ID: serviceID}
@@ -127,7 +135,7 @@ func (r *ServicesRegistry) DriverName(serviceID string) (string, error) {
 	return service.DriverName, nil
 }
 
-func (r *ServicesRegistry) findServiceByID(serviceID string) (Service, bool) {
+func (r *servicesRegistry) findServiceByID(serviceID string) (Service, bool) {
 	for _, service := range r.services {
 		if service.ID == serviceID {
 			return service, true

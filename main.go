@@ -10,6 +10,7 @@ import (
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csibroker/utils"
 	"code.cloudfoundry.org/debugserver"
+	"code.cloudfoundry.org/goshims/grpcshim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagerflags"
@@ -193,14 +194,23 @@ func createServer(logger lager.Logger) ifrit.Runner {
 	}
 
 	store := brokerstore.NewStore(logger, *dbDriver, dbUsername, dbPassword, *dbHostname, *dbPort, *dbName, *dbCACert, fileName)
+	servicesRegistry, err := csibroker.NewServicesRegistry(
+		&csishim.CsiShim{},
+		&grpcshim.GrpcShim{},
+		*serviceSpec,
+		logger,
+	)
+	if err != nil {
+		logger.Error("services-registry-initialize-error", err)
+		os.Exit(1)
+	}
 
 	serviceBroker, err := csibroker.New(
 		logger,
-		*serviceSpec,
 		&osshim.OsShim{},
 		clock.NewClock(),
 		store,
-		&csishim.CsiShim{},
+		servicesRegistry,
 	)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
 

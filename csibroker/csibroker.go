@@ -63,7 +63,7 @@ type Broker struct {
 	os               osshim.Os
 	mutex            lock
 	clock            clock.Clock
-	servicesRegistry *ServicesRegistry
+	servicesRegistry ServicesRegistry
 	store            brokerstore.Store
 	controllerProbed bool
 }
@@ -73,7 +73,7 @@ func New(
 	os osshim.Os,
 	clock clock.Clock,
 	store brokerstore.Store,
-	servicesRegistry *ServicesRegistry,
+	servicesRegistry ServicesRegistry,
 ) (*Broker, error) {
 
 	logger = logger.Session("new-csi-broker")

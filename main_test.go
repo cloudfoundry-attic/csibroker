@@ -222,22 +222,9 @@ var _ = Describe("csibroker Main", func() {
 
 		})
 
-		It("shows usage to include csiConAddr", func() {
-			var args []string
-			args = append(args, "-dataDir", tempDir)
-			volmanRunner := failRunner{
-				Name:       "csibroker",
-				Command:    exec.Command(binaryPath, args...),
-				StartCheck: "csiConAddr must be provided.",
-			}
-			process = ifrit.Invoke(volmanRunner)
-
-		})
-
 		It("shows usage to include serviceSpec", func() {
 			var args []string
 			args = append(args, "-dataDir", tempDir)
-			args = append(args, "-csiConAddr", csiConAddr)
 			volmanRunner := failRunner{
 				Name:       "csibroker",
 				Command:    exec.Command(binaryPath, args...),
@@ -253,7 +240,6 @@ var _ = Describe("csibroker Main", func() {
 	})
 
 	Context("Has required args", func() {
-
 		var (
 			args               []string
 			listenAddr         string

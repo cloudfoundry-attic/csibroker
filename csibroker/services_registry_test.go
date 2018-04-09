@@ -14,9 +14,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = FDescribe("ServicesRegistry", func() {
+var _ = Describe("ServicesRegistry", func() {
 	var (
-		registry     *csibroker.ServicesRegistry
+		registry     csibroker.ServicesRegistry
 		fakeCsi      *csi_fake.FakeCsi
 		fakeGrpc     *grpc_fake.FakeGrpc
 		specFilepath string

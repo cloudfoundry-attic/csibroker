@@ -6,11 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"code.cloudfoundry.org/csibroker/csibroker"
+	"code.cloudfoundry.org/csibroker/csibroker/csibroker_fake"
 	"code.cloudfoundry.org/csishim/csi_fake"
-	"code.cloudfoundry.org/goshims/grpcshim/grpc_fake"
 	"code.cloudfoundry.org/goshims/osshim/os_fake"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
@@ -26,19 +25,17 @@ import (
 
 var _ = Describe("Broker", func() {
 	var (
-		broker                 *csibroker.Broker
-		fakeOs                 *os_fake.FakeOs
-		specFilepath           string
-		pwd                    string
-		logger                 lager.Logger
-		ctx                    context.Context
-		fakeStore              *brokerstorefakes.FakeStore
-		fakeCsi                *csi_fake.FakeCsi
-		fakeGrpc               *grpc_fake.FakeGrpc
-		conn                   *grpc.ClientConn
-		fakeController         *csi_fake.FakeControllerClient
-		fakeIdentityController *csi_fake.FakeIdentityClient
-		err                    error
+		broker               *csibroker.Broker
+		fakeOs               *os_fake.FakeOs
+		specFilepath         string
+		pwd                  string
+		logger               lager.Logger
+		ctx                  context.Context
+		fakeStore            *brokerstorefakes.FakeStore
+		fakeServicesRegistry *csibroker_fake.FakeServicesRegistry
+		fakeControllerClient *csi_fake.FakeControllerClient
+		fakeIdentityClient   *csi_fake.FakeIdentityClient
+		err                  error
 	)
 
 	BeforeEach(func() {
@@ -46,16 +43,13 @@ var _ = Describe("Broker", func() {
 		ctx = context.TODO()
 		fakeOs = &os_fake.FakeOs{}
 		fakeStore = &brokerstorefakes.FakeStore{}
-		fakeCsi = &csi_fake.FakeCsi{}
-		fakeGrpc = &grpc_fake.FakeGrpc{}
-		fakeController = &csi_fake.FakeControllerClient{}
-		fakeIdentityController = &csi_fake.FakeIdentityClient{}
+		fakeServicesRegistry = &csibroker_fake.FakeServicesRegistry{}
+		fakeControllerClient = &csi_fake.FakeControllerClient{}
+		fakeIdentityClient = &csi_fake.FakeIdentityClient{}
+		fakeServicesRegistry.DriverNameReturns("some-driver-name", nil)
 
-		fakeCsi.NewControllerClientReturns(fakeController)
-		fakeCsi.NewIdentityClientReturns(fakeIdentityController)
-
-		listenAddr := "0.0.0.0:" + strconv.Itoa(8999+GinkgoParallelNode())
-		conn, err = grpc.Dial(listenAddr, grpc.WithInsecure())
+		fakeServicesRegistry.IdentityClientReturns(fakeIdentityClient, nil)
+		fakeServicesRegistry.ControllerClientReturns(fakeControllerClient, nil)
 	})
 
 	Context("when creating first time", func() {
@@ -71,12 +65,20 @@ var _ = Describe("Broker", func() {
 				fakeOs,
 				nil,
 				fakeStore,
-				new(csibroker.ServicesRegistry),
+				fakeServicesRegistry,
 			)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		Context(".Services", func() {
+			It("returns services registry broker services", func() {
+				brokerServices := []brokerapi.Service{
+					{ID: "some-service-1"},
+					{ID: "some-service-2"},
+				}
+				fakeServicesRegistry.BrokerServicesReturns(brokerServices)
+				Expect(broker.Services(ctx)).To(Equal(brokerServices))
+			})
 		})
 
 		Context(".Provision", func() {
@@ -125,12 +127,12 @@ var _ = Describe("Broker", func() {
 
 			Context("if the controller has not been probed yet", func() {
 				It("probes the controller", func() {
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				Context("if the probe fails", func() {
 					BeforeEach(func() {
-						fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+						fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
 					})
 
 					It("should error", func() {
@@ -142,13 +144,13 @@ var _ = Describe("Broker", func() {
 
 			Context("if the controller has been probed already", func() {
 				JustBeforeEach(func() {
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
-					fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, nil)
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
+					fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, nil)
 				})
 
 				It("does not probe the controller again for any future calls", func() {
 					_, _ = broker.Provision(ctx, instanceID, provisionDetails, asyncAllowed)
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 			})
 
@@ -177,8 +179,8 @@ var _ = Describe("Broker", func() {
 					}},
 					Parameters: map[string]string{"a": "b"},
 				}
-				Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
-				_, request, _ := fakeController.CreateVolumeArgsForCall(0)
+				Expect(fakeControllerClient.CreateVolumeCallCount()).To(Equal(1))
+				_, request, _ := fakeControllerClient.CreateVolumeArgsForCall(0)
 				Expect(request).To(Equal(expectedRequest))
 			})
 
@@ -190,11 +192,11 @@ var _ = Describe("Broker", func() {
 						CapacityBytes: int64(20),
 						Id:            "some-volume-id",
 					}
-					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{Volume: volInfo}, nil)
+					fakeControllerClient.CreateVolumeReturns(&csi.CreateVolumeResponse{Volume: volInfo}, nil)
 				})
 
 				It("should save it", func() {
-					Expect(fakeController.CreateVolumeCallCount()).To(Equal(1))
+					Expect(fakeControllerClient.CreateVolumeCallCount()).To(Equal(1))
 
 					fingerprint := csibroker.ServiceFingerPrint{
 						Name:   "csi-storage",
@@ -214,7 +216,7 @@ var _ = Describe("Broker", func() {
 			})
 			Context("when the client returns an error", func() {
 				BeforeEach(func() {
-					fakeController.CreateVolumeReturns(&csi.CreateVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
+					fakeControllerClient.CreateVolumeReturns(&csi.CreateVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
 				})
 
 				It("should error", func() {
@@ -333,7 +335,7 @@ var _ = Describe("Broker", func() {
 
 			Context("when the probe fails", func() {
 				BeforeEach(func() {
-					fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+					fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
 				})
 
 				It("should error", func() {
@@ -382,20 +384,20 @@ var _ = Describe("Broker", func() {
 
 				Context("if the controller has been probed already", func() {
 					JustBeforeEach(func() {
-						Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
-						fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, nil)
+						Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
+						fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, nil)
 					})
 
 					It("does not probe the controller again for any future calls", func() {
 						_, err = broker.Deprovision(ctx, instanceID, deprovisionDetails, asyncAllowed)
-						Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+						Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 					})
 				})
 
 				It("probes the controller", func() {
-					_, request, _ := fakeIdentityController.ProbeArgsForCall(0)
+					_, request, _ := fakeIdentityClient.ProbeArgsForCall(0)
 					Expect(request).To(Equal(&csi.ProbeRequest{}))
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				It("should succeed", func() {
@@ -411,14 +413,14 @@ var _ = Describe("Broker", func() {
 						VolumeId:                "some-volume-id",
 						ControllerDeleteSecrets: map[string]string{},
 					}
-					Expect(fakeController.DeleteVolumeCallCount()).To(Equal(1))
-					_, request, _ := fakeController.DeleteVolumeArgsForCall(0)
+					Expect(fakeControllerClient.DeleteVolumeCallCount()).To(Equal(1))
+					_, request, _ := fakeControllerClient.DeleteVolumeArgsForCall(0)
 					Expect(request).To(Equal(expectedRequest))
 				})
 
 				Context("when the client returns an error", func() {
 					BeforeEach(func() {
-						fakeController.DeleteVolumeReturns(&csi.DeleteVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
+						fakeControllerClient.DeleteVolumeReturns(&csi.DeleteVolumeResponse{}, grpc.Errorf(codes.Unknown, "badness"))
 					})
 
 					It("should error", func() {
@@ -534,14 +536,14 @@ var _ = Describe("Broker", func() {
 			Context("if the controller has not been probed yet", func() {
 				It("probes the controller", func() {
 					_, _ = broker.Bind(ctx, instanceID, "binding-id", bindDetails)
-					_, request, _ := fakeIdentityController.ProbeArgsForCall(0)
+					_, request, _ := fakeIdentityClient.ProbeArgsForCall(0)
 					Expect(request).To(Equal(&csi.ProbeRequest{}))
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				Context("if the probe fails", func() {
 					BeforeEach(func() {
-						fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+						fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
 					})
 
 					It("should error", func() {
@@ -554,15 +556,15 @@ var _ = Describe("Broker", func() {
 
 			Context("if the controller has been probed already", func() {
 				JustBeforeEach(func() {
-					fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, nil)
+					fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, nil)
 					_, err = broker.Bind(ctx, instanceID, "binding-id", bindDetails)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				It("does not probe the controller again for any future calls", func() {
 					_, _ = broker.Bind(ctx, instanceID, "binding-id", bindDetails)
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 			})
 
@@ -626,7 +628,7 @@ var _ = Describe("Broker", func() {
 				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(binding.VolumeMounts[0].Driver).To(Equal("some-driver-one"))
+				Expect(binding.VolumeMounts[0].Driver).To(Equal("some-driver-name"))
 			})
 
 			It("fills in the volume id", func() {
@@ -637,7 +639,6 @@ var _ = Describe("Broker", func() {
 			})
 
 			Context("when the binding already exists", func() {
-
 				It("doesn't error when binding the same details", func() {
 					fakeStore.IsBindingConflictReturns(false)
 					_, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
@@ -730,14 +731,14 @@ var _ = Describe("Broker", func() {
 					err := broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
 					Expect(err).NotTo(HaveOccurred())
 
-					_, request, _ := fakeIdentityController.ProbeArgsForCall(0)
+					_, request, _ := fakeIdentityClient.ProbeArgsForCall(0)
 					Expect(request).To(Equal(&csi.ProbeRequest{}))
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				Context("if the probe fails", func() {
 					BeforeEach(func() {
-						fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
+						fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, grpc.Errorf(codes.Unknown, "probe badness"))
 					})
 
 					It("should error", func() {
@@ -750,16 +751,16 @@ var _ = Describe("Broker", func() {
 
 			Context("if the controller has been probed already", func() {
 				JustBeforeEach(func() {
-					fakeIdentityController.ProbeReturns(&csi.ProbeResponse{}, nil)
+					fakeIdentityClient.ProbeReturns(&csi.ProbeResponse{}, nil)
 					err = broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 
 				It("does not probe the controller again for any future calls", func() {
 					err := broker.Unbind(ctx, instanceID, "binding-id", brokerapi.UnbindDetails{})
 					Expect(err).NotTo(HaveOccurred())
-					Expect(fakeIdentityController.ProbeCallCount()).To(Equal(1))
+					Expect(fakeIdentityClient.ProbeCallCount()).To(Equal(1))
 				})
 			})
 
