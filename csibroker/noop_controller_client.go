@@ -10,9 +10,13 @@ import (
 type NoopControllerClient struct{}
 
 func (c *NoopControllerClient) CreateVolume(ctx context.Context, in *csi.CreateVolumeRequest, opts ...grpc.CallOption) (*csi.CreateVolumeResponse, error) {
+	var capacityBytes int64
+	if in.CapacityRange != nil {
+		capacityBytes = in.CapacityRange.RequiredBytes
+	}
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			CapacityBytes: in.CapacityRange.RequiredBytes,
+			CapacityBytes: capacityBytes,
 			Id:            in.Name,
 			Attributes:    in.Parameters,
 		},
