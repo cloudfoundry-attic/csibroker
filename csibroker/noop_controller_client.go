@@ -1,7 +1,7 @@
 package csibroker
 
 import (
-	"context"
+	"golang.org/x/net/context"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"google.golang.org/grpc"
@@ -10,7 +10,13 @@ import (
 type NoopControllerClient struct{}
 
 func (c *NoopControllerClient) CreateVolume(ctx context.Context, in *csi.CreateVolumeRequest, opts ...grpc.CallOption) (*csi.CreateVolumeResponse, error) {
-	return new(csi.CreateVolumeResponse), nil
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			CapacityBytes: in.CapacityRange.RequiredBytes,
+			Id:            in.Name,
+			Attributes:    in.Parameters,
+		},
+	}, nil
 }
 
 func (c *NoopControllerClient) DeleteVolume(ctx context.Context, in *csi.DeleteVolumeRequest, opts ...grpc.CallOption) (*csi.DeleteVolumeResponse, error) {
