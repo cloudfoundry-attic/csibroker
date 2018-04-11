@@ -304,6 +304,8 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, err
 	}
 
+	logger.Info(fmt.Sprintf("csiVolumeAttributes: %#v", csiVolumeAttributes))
+
 	ret := brokerapi.Binding{
 		Credentials: struct{}{}, // if nil, cloud controller chokes on response
 		VolumeMounts: []brokerapi.VolumeMount{{
