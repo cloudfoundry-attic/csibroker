@@ -316,8 +316,9 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,
 				MountConfig: map[string]interface{}{
-					"id":         csiVolumeId,
-					"attributes": csiVolumeAttributes,
+					"id":             csiVolumeId,
+					"attributes":     csiVolumeAttributes,
+					"binding-params": idFilter(params),
 				},
 			},
 		}},
@@ -394,6 +395,27 @@ func evaluateContainerPath(parameters map[string]interface{}, volId string) stri
 	}
 
 	return path.Join(DefaultContainerPath, volId)
+}
+
+func idFilter(parameters map[string]interface{}) map[string]string {
+	uid := parameters["uid"]
+	uidString := ""
+	if uid != nil {
+		uidString = uid.(string)
+	}
+
+	gid := parameters["gid"]
+	gidString := ""
+	if gid != nil {
+		gid = gid.(string)
+		gidString = gid.(string)
+	}
+
+	return map[string]string{
+		"uid": uidString,
+		"gid": gidString,
+	}
+
 }
 
 func evaluateMode(parameters map[string]interface{}) (string, error) {

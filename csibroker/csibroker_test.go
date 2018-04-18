@@ -504,6 +504,9 @@ var _ = Describe("Broker", func() {
 				serviceID = "ServiceOne.ID"
 				params = make(map[string]interface{})
 				params["key"] = "value"
+				params["uid"] = "1000"
+				params["gid"] = "1001"
+
 				rawParameters, err = json.Marshal(params)
 
 				fingerprint := csibroker.ServiceFingerPrint{
@@ -607,6 +610,13 @@ var _ = Describe("Broker", func() {
 				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(binding.VolumeMounts[0].Mode).To(Equal("rw"))
+			})
+
+			It("pass in only the uid/gid parmas", func() {
+				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+				Expect(err).NotTo(HaveOccurred())
+				bindingParams := binding.VolumeMounts[0].Device.MountConfig["binding-params"]
+				Expect(bindingParams).To(Equal(map[string]string{"uid": "1000", "gid": "1001"}))
 			})
 
 			It("should write state", func() {
