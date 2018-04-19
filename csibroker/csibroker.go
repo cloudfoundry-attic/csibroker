@@ -318,7 +318,7 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 				MountConfig: map[string]interface{}{
 					"id":             csiVolumeId,
 					"attributes":     csiVolumeAttributes,
-					"binding-params": idFilter(params),
+					"binding-params": evaluateId(params),
 				},
 			},
 		}},
@@ -397,25 +397,17 @@ func evaluateContainerPath(parameters map[string]interface{}, volId string) stri
 	return path.Join(DefaultContainerPath, volId)
 }
 
-func idFilter(parameters map[string]interface{}) map[string]string {
-	uid := parameters["uid"]
-	uidString := ""
-	if uid != nil {
-		uidString = uid.(string)
+func evaluateId(parameters map[string]interface{}) map[string]string {
+	if _, ok := parameters["uid"]; !ok {
+		return nil
 	}
-
-	gid := parameters["gid"]
-	gidString := ""
-	if gid != nil {
-		gid = gid.(string)
-		gidString = gid.(string)
+	if _, ok := parameters["gid"]; !ok {
+		return nil
 	}
-
 	return map[string]string{
-		"uid": uidString,
-		"gid": gidString,
+		"uid": parameters["uid"].(string),
+		"gid": parameters["gid"].(string),
 	}
-
 }
 
 func evaluateMode(parameters map[string]interface{}) (string, error) {

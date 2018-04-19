@@ -504,9 +504,6 @@ var _ = Describe("Broker", func() {
 				serviceID = "ServiceOne.ID"
 				params = make(map[string]interface{})
 				params["key"] = "value"
-				params["uid"] = "1000"
-				params["gid"] = "1001"
-
 				rawParameters, err = json.Marshal(params)
 
 				fingerprint := csibroker.ServiceFingerPrint{
@@ -534,6 +531,56 @@ var _ = Describe("Broker", func() {
 					ServiceID:     serviceID,
 					RawParameters: rawParameters,
 				}
+			})
+
+			Context("when uid/gid is passed from binding config", func() {
+				BeforeEach(func() {
+					params["uid"] = "1000"
+					params["gid"] = "1001"
+					rawParameters, err = json.Marshal(params)
+
+					fingerprint := csibroker.ServiceFingerPrint{
+						Name: "some-csi-storage",
+						Volume: &csi.Volume{
+							Id:         instanceID,
+							Attributes: map[string]string{"foo": "bar"},
+						},
+					}
+
+					// simulate untyped data loaded from a data file
+					jsonFingerprint := &map[string]interface{}{}
+					raw, err := json.Marshal(fingerprint)
+					Expect(err).ToNot(HaveOccurred())
+					err = json.Unmarshal(raw, jsonFingerprint)
+					Expect(err).ToNot(HaveOccurred())
+
+					fakeStore.RetrieveInstanceDetailsReturns(brokerstore.ServiceInstance{
+						ServiceID:          serviceID,
+						ServiceFingerPrint: jsonFingerprint,
+					}, nil)
+
+					bindDetails = brokerapi.BindDetails{
+						AppGUID:       "guid",
+						ServiceID:     serviceID,
+						RawParameters: rawParameters,
+					}
+				})
+
+				It("should set bindingParams", func() {
+					binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+					Expect(err).NotTo(HaveOccurred())
+					bindingParams := binding.VolumeMounts[0].Device.MountConfig["binding-params"]
+					Expect(bindingParams).To(Equal(map[string]string{"uid": "1000", "gid": "1001"}))
+				})
+			})
+
+			Context("when no uid/gid is passed from binding config", func() {
+				It("bindingParams should be nil", func() {
+					binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
+					Expect(err).NotTo(HaveOccurred())
+					bindingParams := binding.VolumeMounts[0].Device.MountConfig["binding-params"]
+					Expect(bindingParams).Should(BeNil())
+				})
 			})
 
 			Context("if the controller has not been probed yet", func() {
@@ -610,13 +657,6 @@ var _ = Describe("Broker", func() {
 				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(binding.VolumeMounts[0].Mode).To(Equal("rw"))
-			})
-
-			It("pass in only the uid/gid parmas", func() {
-				binding, err := broker.Bind(ctx, "some-instance-id", "binding-id", bindDetails)
-				Expect(err).NotTo(HaveOccurred())
-				bindingParams := binding.VolumeMounts[0].Device.MountConfig["binding-params"]
-				Expect(bindingParams).To(Equal(map[string]string{"uid": "1000", "gid": "1001"}))
 			})
 
 			It("should write state", func() {
