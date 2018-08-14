@@ -50,3 +50,15 @@ func (c *NoopControllerClient) GetCapacity(ctx context.Context, in *csi.GetCapac
 func (c *NoopControllerClient) ControllerGetCapabilities(ctx context.Context, in *csi.ControllerGetCapabilitiesRequest, opts ...grpc.CallOption) (*csi.ControllerGetCapabilitiesResponse, error) {
 	return new(csi.ControllerGetCapabilitiesResponse), nil
 }
+
+func (c *NoopControllerClient) CreateSnapshot(ctx context.Context, in *csi.CreateSnapshotRequest, opts ...grpc.CallOption) (*csi.CreateSnapshotResponse, error) {
+	return new(csi.CreateSnapshotResponse), nil
+}
+
+func (c *NoopControllerClient) DeleteSnapshot(ctx context.Context, in *csi.DeleteSnapshotRequest, opts ...grpc.CallOption) (*csi.DeleteSnapshotResponse, error) {
+	return new(csi.DeleteSnapshotResponse), nil
+}
+
+func (c *NoopControllerClient) ListSnapshots(ctx context.Context, in *csi.ListSnapshotsRequest, opts ...grpc.CallOption) (*csi.ListSnapshotsResponse, error) {
+	return new(csi.ListSnapshotsResponse), nil
+}
