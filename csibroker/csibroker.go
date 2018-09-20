@@ -16,6 +16,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -65,7 +66,7 @@ type Broker struct {
 	clock            clock.Clock
 	servicesRegistry ServicesRegistry
 	store            brokerstore.Store
-	controllerProbed bool
+	client           kubernetes.Interface
 }
 
 func New(
@@ -73,6 +74,7 @@ func New(
 	os osshim.Os,
 	clock clock.Clock,
 	store brokerstore.Store,
+	client kubernetes.Interface,
 	servicesRegistry ServicesRegistry,
 ) (*Broker, error) {
 
@@ -87,7 +89,7 @@ func New(
 		clock:            clock,
 		store:            store,
 		servicesRegistry: servicesRegistry,
-		controllerProbed: false,
+		client:           client,
 	}
 
 	return &theBroker, nil
@@ -102,18 +104,13 @@ func (b *Broker) Services(_ context.Context) []brokerapi.Service {
 }
 
 func (b *Broker) Provision(context context.Context, instanceID string, details brokerapi.ProvisionDetails, asyncAllowed bool) (_ brokerapi.ProvisionedServiceSpec, e error) {
-	err := b.probeController(details.ServiceID)
-	if err != nil {
-		return brokerapi.ProvisionedServiceSpec{}, err
-	}
 	logger := b.logger.Session("provision").WithData(lager.Data{"instanceID": instanceID, "details": details})
 	logger.Info("start")
 	defer logger.Info("end")
 
 	var configuration csi.CreateVolumeRequest
-
 	logger.Debug("provision-raw-parameters", lager.Data{"RawParameters": details.RawParameters})
-	err = jsonpb.UnmarshalString(string(details.RawParameters), &configuration)
+	err := jsonpb.UnmarshalString(string(details.RawParameters), &configuration)
 	if err != nil {
 		logger.Error("provision-raw-parameters-decode-error", err)
 		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
@@ -126,55 +123,44 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
 
-	controllerClient, err := b.servicesRegistry.ControllerClient(details.ServiceID)
-	if err != nil {
-		return brokerapi.ProvisionedServiceSpec{}, err
-	}
-	response, err := controllerClient.CreateVolume(context, &configuration)
-	if err != nil {
-		return brokerapi.ProvisionedServiceSpec{}, err
-	}
+	// create volume with kube client
 
-	volInfo := response.GetVolume()
+	// volInfo := response.GetVolume()
 
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-	defer func() {
-		out := b.store.Save(logger)
-		if e == nil {
-			e = out
-		}
-	}()
-
-	fingerprint := ServiceFingerPrint{
-		configuration.Name,
-		volInfo,
-	}
-	instanceDetails := brokerstore.ServiceInstance{
-		details.ServiceID,
-		details.PlanID,
-		details.OrganizationGUID,
-		details.SpaceGUID,
-		fingerprint,
-	}
-
-	if b.instanceConflicts(instanceDetails, instanceID) {
-		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
-	}
-	err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
-	if err != nil {
-		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
-	}
-	logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
+	// b.mutex.Lock()
+	// defer b.mutex.Unlock()
+	// defer func() {
+	// 	out := b.store.Save(logger)
+	// 	if e == nil {
+	// 		e = out
+	// 	}
+	// }()
+	//
+	// fingerprint := ServiceFingerPrint{
+	// 	configuration.Name,
+	// 	volInfo,
+	// }
+	// instanceDetails := brokerstore.ServiceInstance{
+	// 	details.ServiceID,
+	// 	details.PlanID,
+	// 	details.OrganizationGUID,
+	// 	details.SpaceGUID,
+	// 	fingerprint,
+	// }
+	//
+	// if b.instanceConflicts(instanceDetails, instanceID) {
+	// 	return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
+	// }
+	// err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
+	// if err != nil {
+	// 	return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
+	// }
+	// logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
 
 	return brokerapi.ProvisionedServiceSpec{IsAsync: false}, nil
 }
 
 func (b *Broker) Deprovision(context context.Context, instanceID string, details brokerapi.DeprovisionDetails, asyncAllowed bool) (_ brokerapi.DeprovisionServiceSpec, e error) {
-	err := b.probeController(details.ServiceID)
-	if err != nil {
-		return brokerapi.DeprovisionServiceSpec{}, err
-	}
 	logger := b.logger.Session("deprovision")
 	logger.Info("start")
 	defer logger.Info("end")
@@ -234,10 +220,6 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 }
 
 func (b *Broker) Bind(context context.Context, instanceID string, bindingID string, bindDetails brokerapi.BindDetails) (_ brokerapi.Binding, e error) {
-	err := b.probeController(bindDetails.ServiceID)
-	if err != nil {
-		return brokerapi.Binding{}, err
-	}
 	logger := b.logger.Session("bind")
 	logger.Info("start", lager.Data{"bindingID": bindingID, "details": bindDetails})
 	defer logger.Info("end")
@@ -327,10 +309,6 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 }
 
 func (b *Broker) Unbind(context context.Context, instanceID string, bindingID string, details brokerapi.UnbindDetails) (e error) {
-	err := b.probeController(details.ServiceID)
-	if err != nil {
-		return err
-	}
 	logger := b.logger.Session("unbind")
 	logger.Info("start")
 	defer logger.Info("end")
@@ -372,21 +350,6 @@ func (b *Broker) instanceConflicts(details brokerstore.ServiceInstance, instance
 
 func (b *Broker) bindingConflicts(bindingID string, details brokerapi.BindDetails) bool {
 	return b.store.IsBindingConflict(bindingID, details)
-}
-
-func (b *Broker) probeController(serviceID string) error {
-	if !b.controllerProbed {
-		identityClient, err := b.servicesRegistry.IdentityClient(serviceID)
-		if err != nil {
-			return err
-		}
-		_, err = identityClient.Probe(context.TODO(), &csi.ProbeRequest{})
-		if err != nil {
-			return err
-		}
-		b.controllerProbed = true
-	}
-	return nil
 }
 
 func evaluateContainerPath(parameters map[string]interface{}, volId string) string {

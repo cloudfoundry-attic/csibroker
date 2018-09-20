@@ -14,6 +14,8 @@ import (
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagerflags"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"fmt"
 	"path/filepath"
@@ -89,6 +91,12 @@ var cfServiceName = flag.String(
 	"cfServiceName",
 	"",
 	"(optional) For CF pushed apps, the service name in VCAP_SERVICES where we should find database credentials.  dbDriver must be defined if this option is set, but all other db parameters will be extracted from the service binding.",
+)
+
+var kubeConfig = flag.String(
+	"kubeConfig",
+	"",
+	"Kube config",
 )
 
 var (
@@ -205,11 +213,24 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		os.Exit(1)
 	}
 
+	kubeConfigForClient, err := clientcmd.BuildConfigFromFlags("", *kubeConfig)
+	if err != nil {
+		logger.Error("failed-to-create-kube-config", err)
+		os.Exit(1)
+	}
+
+	kubeClient, err := kubernetes.NewForConfig(kubeConfigForClient)
+	if err != nil {
+		logger.Error("failed-to-create-kube-client", err)
+		os.Exit(1)
+	}
+
 	serviceBroker, err := csibroker.New(
 		logger,
 		&osshim.OsShim{},
 		clock.NewClock(),
 		store,
+		kubeClient,
 		servicesRegistry,
 	)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
