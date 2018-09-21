@@ -231,10 +231,10 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		clock.NewClock(),
 		store,
 		kubeClient,
+		"default",
 		servicesRegistry,
 	)
 	logger.Info("listenAddr: " + *atAddress + ", serviceSpec: " + *serviceSpec)
-
 	if err != nil {
 		logger.Error("csibroker-initialize-error", err)
 		os.Exit(1)

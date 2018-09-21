@@ -16,6 +16,9 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -44,7 +47,7 @@ func (e ErrInvalidSpecFile) Error() string {
 
 type ServiceFingerPrint struct {
 	Name   string
-	Volume *csi.Volume
+	Volume *v1.PersistentVolume
 }
 
 type Service struct {
@@ -67,6 +70,7 @@ type Broker struct {
 	servicesRegistry ServicesRegistry
 	store            brokerstore.Store
 	client           kubernetes.Interface
+	namespace        string
 }
 
 func New(
@@ -75,6 +79,7 @@ func New(
 	clock clock.Clock,
 	store brokerstore.Store,
 	client kubernetes.Interface,
+	namespace string,
 	servicesRegistry ServicesRegistry,
 ) (*Broker, error) {
 
@@ -88,8 +93,13 @@ func New(
 		mutex:            &sync.Mutex{},
 		clock:            clock,
 		store:            store,
-		servicesRegistry: servicesRegistry,
 		client:           client,
+		namespace:        namespace,
+		servicesRegistry: servicesRegistry,
+	}
+	err := store.Restore(logger)
+	if err != nil {
+		return nil, err
 	}
 
 	return &theBroker, nil
@@ -123,39 +133,71 @@ func (b *Broker) Provision(context context.Context, instanceID string, details b
 		return brokerapi.ProvisionedServiceSpec{}, errors.New("config requires \"volume_capabilities\"")
 	}
 
-	// create volume with kube client
+	quantity, err := resource.ParseQuantity("1Gi")
+	if err != nil {
+		logger.Error("failed-to-parse-quantity", err)
+		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
+	}
+	volume, err := b.client.CoreV1().PersistentVolumes().Create(&v1.PersistentVolume{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "PersistentVolume",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   configuration.Name,
+			Labels: map[string]string{"name": configuration.Name},
+		},
 
-	// volInfo := response.GetVolume()
+		Spec: v1.PersistentVolumeSpec{
+			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+			Capacity:    v1.ResourceList{v1.ResourceStorage: quantity},
+			PersistentVolumeSource: v1.PersistentVolumeSource{
+				CSI: &v1.CSIPersistentVolumeSource{
+					Driver:       "csi-nfsplugin",
+					VolumeHandle: "data-id",
+					VolumeAttributes: map[string]string{
+						"server": "10.0.16.4",
+						"share":  "/export/users",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		logger.Error("error-getting-pods-list", err)
+		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrRawParamsInvalid
+	}
+	logger.Debug("created-volume", lager.Data{"volume": volume})
 
-	// b.mutex.Lock()
-	// defer b.mutex.Unlock()
-	// defer func() {
-	// 	out := b.store.Save(logger)
-	// 	if e == nil {
-	// 		e = out
-	// 	}
-	// }()
-	//
-	// fingerprint := ServiceFingerPrint{
-	// 	configuration.Name,
-	// 	volInfo,
-	// }
-	// instanceDetails := brokerstore.ServiceInstance{
-	// 	details.ServiceID,
-	// 	details.PlanID,
-	// 	details.OrganizationGUID,
-	// 	details.SpaceGUID,
-	// 	fingerprint,
-	// }
-	//
-	// if b.instanceConflicts(instanceDetails, instanceID) {
-	// 	return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
-	// }
-	// err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
-	// if err != nil {
-	// 	return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
-	// }
-	// logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	defer func() {
+		out := b.store.Save(logger)
+		if e == nil {
+			e = out
+		}
+	}()
+
+	fingerprint := ServiceFingerPrint{
+		configuration.Name,
+		volume,
+	}
+	instanceDetails := brokerstore.ServiceInstance{
+		details.ServiceID,
+		details.PlanID,
+		details.OrganizationGUID,
+		details.SpaceGUID,
+		fingerprint,
+	}
+
+	if b.instanceConflicts(instanceDetails, instanceID) {
+		return brokerapi.ProvisionedServiceSpec{}, brokerapi.ErrInstanceAlreadyExists
+	}
+	err = b.store.CreateInstanceDetails(instanceID, instanceDetails)
+	if err != nil {
+		return brokerapi.ProvisionedServiceSpec{}, fmt.Errorf("failed to store instance details %s", instanceID)
+	}
+	logger.Info("service-instance-created", lager.Data{"instanceDetails": instanceDetails})
 
 	return brokerapi.ProvisionedServiceSpec{IsAsync: false}, nil
 }
@@ -170,13 +212,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 	if instanceID == "" {
 		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires instance ID")
 	}
-	if details.PlanID == "" {
-		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires \"plan_id\"")
-	}
-	if details.ServiceID == "" {
-		return brokerapi.DeprovisionServiceSpec{}, errors.New("volume deletion requires \"service_id\"")
-	}
-
+	logger.Debug("instance-id", lager.Data{"id": instanceID})
 	instanceDetails, err := b.store.RetrieveInstanceDetails(instanceID)
 	if err != nil {
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
@@ -190,17 +226,12 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 
-	configuration.VolumeId = fingerprint.Volume.Id
-
-	controllerClient, err := b.servicesRegistry.ControllerClient(details.ServiceID)
-	if err != nil {
-		return brokerapi.DeprovisionServiceSpec{}, err
-	}
-
-	_, err = controllerClient.DeleteVolume(context, &configuration)
-	if err != nil {
-		return brokerapi.DeprovisionServiceSpec{}, err
-	}
+	err = b.client.CoreV1().PersistentVolumes().Delete(fingerprint.Volume.Name, &metav1.DeleteOptions{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "PersistentVolume",
+			APIVersion: "v1",
+		},
+	})
 
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -238,10 +269,11 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 	if err != nil {
 		return brokerapi.Binding{}, brokerapi.ErrInstanceDoesNotExist
 	}
+	logger.Info("retrieved-instance-details", lager.Data{"instanceDetails": instanceDetails})
 
-	if bindDetails.AppGUID == "" {
-		return brokerapi.Binding{}, brokerapi.ErrAppGuidNotProvided
-	}
+	// if bindDetails.AppGUID == "" {
+	// 	return brokerapi.Binding{}, brokerapi.ErrAppGuidNotProvided
+	// }
 
 	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
 
@@ -249,11 +281,7 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, err
 	}
 
-	csiVolumeId := fingerprint.Volume.Id
-	csiVolumeAttributes := fingerprint.Volume.Attributes
-
 	params := make(map[string]interface{})
-
 	logger.Debug(fmt.Sprintf("bindDetails: %#v", bindDetails.RawParameters))
 
 	if bindDetails.RawParameters != nil {
@@ -272,7 +300,42 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, brokerapi.ErrBindingAlreadyExists
 	}
 
-	logger.Info("retrieved-instance-details", lager.Data{"instanceDetails": instanceDetails})
+	// TODO: pull from request
+	quantity, err := resource.ParseQuantity("1Gi")
+	if err != nil {
+		logger.Error("failed-to-parse-quantity", err)
+		return brokerapi.Binding{}, brokerapi.ErrRawParamsInvalid
+	}
+
+	// TODO: cleanup in defer
+	volumeClaim, err := b.client.CoreV1().PersistentVolumeClaims(b.namespace).Create(&v1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "PersistentVolumeClaim",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fingerprint.Volume.Name,
+		},
+
+		Spec: v1.PersistentVolumeClaimSpec{
+			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
+			Resources:   v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: quantity}},
+			Selector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{
+						Key:      "name",
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{fingerprint.Volume.Name},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		logger.Error("error-creating-claim", err)
+		return brokerapi.Binding{}, brokerapi.ErrRawParamsInvalid
+	}
+	logger.Debug("created-volume-claim", lager.Data{"volume-claim": volumeClaim})
 
 	err = b.store.CreateBindingDetails(bindingID, bindDetails)
 	if err != nil {
@@ -281,26 +344,17 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 
 	volumeId := fmt.Sprintf("%s-volume", instanceID)
 
-	driverName, err := b.servicesRegistry.DriverName(bindDetails.ServiceID)
-	if err != nil {
-		return brokerapi.Binding{}, err
-	}
-
-	logger.Info(fmt.Sprintf("csiVolumeAttributes: %#v", csiVolumeAttributes))
-
 	ret := brokerapi.Binding{
 		Credentials: struct{}{}, // if nil, cloud controller chokes on response
 		VolumeMounts: []brokerapi.VolumeMount{{
 			ContainerDir: evaluateContainerPath(params, instanceID),
 			Mode:         mode,
-			Driver:       driverName,
+			Driver:       "csi",
 			DeviceType:   "shared",
 			Device: brokerapi.SharedDevice{
 				VolumeId: volumeId,
 				MountConfig: map[string]interface{}{
-					"id":             csiVolumeId,
-					"attributes":     csiVolumeAttributes,
-					"binding-params": evaluateId(params),
+					"name": volumeClaim.Name,
 				},
 			},
 		}},
@@ -322,12 +376,24 @@ func (b *Broker) Unbind(context context.Context, instanceID string, bindingID st
 		}
 	}()
 
-	if _, err := b.store.RetrieveInstanceDetails(instanceID); err != nil {
+	var instanceDetails brokerstore.ServiceInstance
+	var err error
+	if instanceDetails, err = b.store.RetrieveInstanceDetails(instanceID); err != nil {
 		return brokerapi.ErrInstanceDoesNotExist
 	}
 
 	if _, err := b.store.RetrieveBindingDetails(bindingID); err != nil {
 		return brokerapi.ErrBindingDoesNotExist
+	}
+
+	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
+	if err != nil {
+		return err
+	}
+
+	err = b.client.CoreV1().PersistentVolumeClaims(b.namespace).Delete(fingerprint.Name, &metav1.DeleteOptions{})
+	if err != nil {
+		return err
 	}
 
 	if err := b.store.DeleteBindingDetails(bindingID); err != nil {
