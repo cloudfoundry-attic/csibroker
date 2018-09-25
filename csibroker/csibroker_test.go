@@ -851,4 +851,38 @@ var _ = Describe("Broker", func() {
 			})
 		})
 	})
+
+	Context("when creating for a subsequent time", func() {
+		It("restores state from the saved location", func() {
+			broker, err = csibroker.New(
+				logger,
+				fakeOs,
+				nil,
+				fakeStore,
+				fakeServicesRegistry,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fakeStore.RestoreCallCount()).To(Equal(1))
+			l := fakeStore.RestoreArgsForCall(0)
+			Expect(l).To(BeAssignableToTypeOf(lager.NewLogger("")))
+		})
+
+		Context("when restoring state fails", func() {
+			BeforeEach(func() {
+				fakeStore.RestoreReturns(errors.New("failed-to-load-store"))
+			})
+
+			It("returns an error", func() {
+				broker, err = csibroker.New(
+					logger,
+					fakeOs,
+					nil,
+					fakeStore,
+					fakeServicesRegistry,
+				)
+				Expect(err).To(MatchError("failed-to-load-store"))
+			})
+		})
+	})
 })

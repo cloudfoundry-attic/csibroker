@@ -75,7 +75,6 @@ func New(
 	store brokerstore.Store,
 	servicesRegistry ServicesRegistry,
 ) (*Broker, error) {
-
 	logger = logger.Session("new-csi-broker")
 	logger.Info("start")
 	defer logger.Info("end")
@@ -90,7 +89,9 @@ func New(
 		controllerProbed: false,
 	}
 
-	return &theBroker, nil
+	err := store.Restore(logger)
+
+	return &theBroker, err
 }
 
 func (b *Broker) Services(_ context.Context) []brokerapi.Service {
