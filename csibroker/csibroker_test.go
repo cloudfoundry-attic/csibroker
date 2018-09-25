@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csibroker/csibroker/csibroker_fake"
@@ -27,8 +25,6 @@ var _ = Describe("Broker", func() {
 	var (
 		broker               *csibroker.Broker
 		fakeOs               *os_fake.FakeOs
-		specFilepath         string
-		pwd                  string
 		logger               lager.Logger
 		ctx                  context.Context
 		fakeStore            *brokerstorefakes.FakeStore
@@ -54,12 +50,6 @@ var _ = Describe("Broker", func() {
 
 	Context("when creating first time", func() {
 		BeforeEach(func() {
-			pwd, err = os.Getwd()
-			Expect(err).ToNot(HaveOccurred())
-			specFilepath = filepath.Join(pwd, "..", "fixtures", "service_spec.json")
-
-			Expect(err).NotTo(HaveOccurred())
-
 			broker, err = csibroker.New(
 				logger,
 				fakeOs,

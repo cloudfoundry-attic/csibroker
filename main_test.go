@@ -120,7 +120,6 @@ func (r failRunner) Run(sigChan <-chan os.Signal, ready chan<- struct{}) error {
 
 var _ = Describe("csibroker Main", func() {
 	var (
-		csiConAddr   string
 		tempDir      string
 		pwd          string
 		err          error
@@ -131,7 +130,6 @@ var _ = Describe("csibroker Main", func() {
 		tempDir = os.TempDir()
 		pwd, err = os.Getwd()
 		Expect(err).ToNot(HaveOccurred())
-		csiConAddr = "0.0.0.0:" + strconv.Itoa(5005+GinkgoParallelNode())
 		specFilepath = filepath.Join(pwd, "fixtures", "service_spec.json")
 	})
 
