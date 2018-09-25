@@ -193,7 +193,7 @@ func createServer(logger lager.Logger) ifrit.Runner {
 		parseVcapServices(logger, &osshim.OsShim{})
 	}
 
-	store := brokerstore.NewStore(logger, *dbDriver, dbUsername, dbPassword, *dbHostname, *dbPort, *dbName, *dbCACert, fileName)
+	store := brokerstore.NewStore(logger, *dbDriver, dbUsername, dbPassword, *dbHostname, *dbPort, *dbName, *dbCACert, "", "", "", "", "", fileName, "")
 	servicesRegistry, err := csibroker.NewServicesRegistry(
 		&csishim.CsiShim{},
 		&grpcshim.GrpcShim{},
