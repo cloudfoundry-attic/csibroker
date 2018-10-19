@@ -1,8 +1,7 @@
 ---
 applications:
 - name: csibroker
-  buildpacks:
-  - binary_buildpack
+  buildpack: binary_buildpack
   command: bin/csibroker --listenAddr="0.0.0.0:$PORT" --serviceName="$SERVICENAME" --serviceId="csibroker"
   env:
     SERVICENAME: csi
