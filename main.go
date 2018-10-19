@@ -4,21 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"code.cloudfoundry.org/clock"
 	"code.cloudfoundry.org/csibroker/csibroker"
 	"code.cloudfoundry.org/csibroker/utils"
+	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/debugserver"
 	"code.cloudfoundry.org/goshims/grpcshim"
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagerflags"
-
-	"fmt"
-	"path/filepath"
-
-	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
 	"github.com/pivotal-cf/brokerapi"
 	"github.com/tedsuo/ifrit"
@@ -102,11 +100,7 @@ func main() {
 
 	checkParams()
 
-	sink, err := lager.NewRedactingWriterSink(os.Stdout, lager.DEBUG, nil, nil)
-	if err != nil {
-		panic(err)
-	}
-	logger, logSink := lagerflags.NewFromSink("csibroker", sink)
+	logger, logSink := newLogger()
 	logger.Info("starting")
 	defer logger.Info("ends")
 
@@ -142,6 +136,13 @@ func checkParams() {
 		flag.Usage()
 		os.Exit(1)
 	}
+}
+
+func newLogger() (lager.Logger, *lager.ReconfigurableSink) {
+	lagerConfig := lagerflags.ConfigFromFlags()
+	lagerConfig.RedactSecrets = true
+
+	return lagerflags.NewFromConfig("csibroker", lagerConfig)
 }
 
 func parseVcapServices(logger lager.Logger, os osshim.Os) {
