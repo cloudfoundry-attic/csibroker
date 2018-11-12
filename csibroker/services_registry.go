@@ -8,7 +8,7 @@ import (
 	"code.cloudfoundry.org/csishim"
 	"code.cloudfoundry.org/goshims/grpcshim"
 	"code.cloudfoundry.org/lager"
-	"github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/pivotal-cf/brokerapi"
 	"google.golang.org/grpc"
 )

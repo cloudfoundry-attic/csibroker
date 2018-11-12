@@ -3,7 +3,7 @@ package csibroker
 import (
 	"golang.org/x/net/context"
 
-	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
 )
 
@@ -17,8 +17,8 @@ func (c *NoopControllerClient) CreateVolume(ctx context.Context, in *csi.CreateV
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes: capacityBytes,
-			Id:            in.Name,
-			Attributes:    in.Parameters,
+			VolumeId:      in.Name,
+			VolumeContext: in.Parameters,
 		},
 	}, nil
 }

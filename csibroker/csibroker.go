@@ -13,7 +13,7 @@ import (
 	"code.cloudfoundry.org/goshims/osshim"
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
-	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/pivotal-cf/brokerapi"
 )
@@ -197,7 +197,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, brokerapi.ErrInstanceDoesNotExist
 	}
 
-	configuration.ControllerDeleteSecrets = map[string]string{}
+	configuration.Secrets = map[string]string{}
 
 	fingerprint, err := getFingerprint(instanceDetails.ServiceFingerPrint)
 
@@ -205,7 +205,7 @@ func (b *Broker) Deprovision(context context.Context, instanceID string, details
 		return brokerapi.DeprovisionServiceSpec{}, err
 	}
 
-	configuration.VolumeId = fingerprint.Volume.Id
+	configuration.VolumeId = fingerprint.Volume.VolumeId
 
 	controllerClient, err := b.servicesRegistry.ControllerClient(details.ServiceID)
 	if err != nil {
@@ -268,8 +268,8 @@ func (b *Broker) Bind(context context.Context, instanceID string, bindingID stri
 		return brokerapi.Binding{}, err
 	}
 
-	csiVolumeId := fingerprint.Volume.Id
-	csiVolumeAttributes := fingerprint.Volume.Attributes
+	csiVolumeId := fingerprint.Volume.VolumeId
+	csiVolumeAttributes := fingerprint.Volume.VolumeContext
 
 	params := make(map[string]interface{})
 

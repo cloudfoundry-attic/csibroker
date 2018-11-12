@@ -13,7 +13,7 @@ import (
 	"code.cloudfoundry.org/lager/lagertest"
 	"code.cloudfoundry.org/service-broker-store/brokerstore"
 	"code.cloudfoundry.org/service-broker-store/brokerstore/brokerstorefakes"
-	"github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/pivotal-cf/brokerapi"
@@ -180,7 +180,7 @@ var _ = Describe("Broker", func() {
 				BeforeEach(func() {
 					volInfo = &csi.Volume{
 						CapacityBytes: int64(20),
-						Id:            "some-volume-id",
+						VolumeId:      "some-volume-id",
 					}
 					fakeControllerClient.CreateVolumeReturns(&csi.CreateVolumeResponse{Volume: volInfo}, nil)
 				})
@@ -355,7 +355,7 @@ var _ = Describe("Broker", func() {
 
 					fingerprint := csibroker.ServiceFingerPrint{
 						Name:   "some-csi-storage",
-						Volume: &csi.Volume{Id: "some-volume-id"},
+						Volume: &csi.Volume{VolumeId: "some-volume-id"},
 					}
 
 					// simulate untyped data loaded from a data file
@@ -400,8 +400,8 @@ var _ = Describe("Broker", func() {
 
 				It("should send the request to the controller client", func() {
 					expectedRequest := &csi.DeleteVolumeRequest{
-						VolumeId:                "some-volume-id",
-						ControllerDeleteSecrets: map[string]string{},
+						VolumeId: "some-volume-id",
+						Secrets:  map[string]string{},
 					}
 					Expect(fakeControllerClient.DeleteVolumeCallCount()).To(Equal(1))
 					_, request, _ := fakeControllerClient.DeleteVolumeArgsForCall(0)
@@ -499,8 +499,8 @@ var _ = Describe("Broker", func() {
 				fingerprint := csibroker.ServiceFingerPrint{
 					Name: "some-csi-storage",
 					Volume: &csi.Volume{
-						Id:         instanceID,
-						Attributes: map[string]string{"foo": "bar"},
+						VolumeId:      instanceID,
+						VolumeContext: map[string]string{"foo": "bar"},
 					},
 				}
 
@@ -532,8 +532,8 @@ var _ = Describe("Broker", func() {
 					fingerprint := csibroker.ServiceFingerPrint{
 						Name: "some-csi-storage",
 						Volume: &csi.Volume{
-							Id:         instanceID,
-							Attributes: map[string]string{"foo": "bar"},
+							VolumeId:      instanceID,
+							VolumeContext: map[string]string{"foo": "bar"},
 						},
 					}
 
